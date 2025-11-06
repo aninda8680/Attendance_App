@@ -20,7 +20,7 @@ const LOGIN_URL = 'https://adamasknowledgecity.ac.in/student/login';
 const ATT_URL = 'https://adamasknowledgecity.ac.in/student/attendance';
 
 let browser; // Persistent browser
-
+const chromium = require('chrome-aws-lambda');
 // ====== MONGO INIT ======
 async function initDB() {
   try {
@@ -38,21 +38,13 @@ initDB();
 // ====== PERSISTENT BROWSER ======
 async function getBrowser() {
   if (!browser) {
-    try {
-      browser = await puppeteer.launch({
-        headless: true,
-        args: [
-          '--no-sandbox',
-          '--disable-setuid-sandbox',
-          '--disable-dev-shm-usage',
-          '--disable-gpu',
-          '--single-process',
-        ],
-      });
-      console.log('🚀 Puppeteer browser launched');
-    } catch (e) {
-      console.error('❌ Puppeteer launch failed:', e);
-    }
+    browser = await chromium.puppeteer.launch({
+      args: chromium.args,
+      defaultViewport: chromium.defaultViewport,
+      executablePath: await chromium.executablePath,
+      headless: chromium.headless,
+    });
+    console.log('🚀 Chromium launched');
   }
   return browser;
 }
@@ -117,7 +109,7 @@ app.get('/fetch-attendance', async (req, res) => {
     page = await browser.newPage();
     await page.setViewport({ width: 1200, height: 900 });
 
-    // Restore cookies if present
+    console.log('🔹 Restoring cookies if any...');
     if (user.cookies?.length) {
       const validCookies = user.cookies
         .filter(c => c.name && c.value && c.domain)
@@ -136,27 +128,31 @@ app.get('/fetch-attendance', async (req, res) => {
       }
     }
 
-    // Go to attendance page first
+    console.log('🔹 Navigating to attendance page...');
     await page.goto(ATT_URL, { waitUntil: 'domcontentloaded', timeout: 20000 });
+    console.log('Current URL:', page.url());
 
     // Login if redirected
     if (page.url().includes('login')) {
-      console.log('📄 Logging in...');
+      console.log('📄 Redirected to login, performing login...');
       await page.goto(LOGIN_URL, { waitUntil: 'domcontentloaded', timeout: 20000 });
       await page.type('input[name="registration_no"]', username, { delay: 50 });
       await page.type('input[name="password"]', password, { delay: 50 });
 
       await Promise.all([
         page.click('#login_btn'),
-        page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 15000 }),
+        page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 20000 }),
       ]);
 
+      console.log('✅ Logged in, saving new cookies...');
       const newCookies = await page.cookies();
       await usersCollection.updateOne({ uid }, { $set: { cookies: newCookies } });
     }
 
-    // Fetch attendance table
+    console.log('🔹 Fetching attendance table...');
     await page.goto(ATT_URL, { waitUntil: 'domcontentloaded', timeout: 15000 });
+    console.log('Current URL after login:', page.url());
+
     const attendance = await page.evaluate(() => {
       const table = document.querySelector('#myTable');
       if (!table) return { error: 'no_table_found', html: document.body.innerHTML.slice(0, 500) };
@@ -179,14 +175,17 @@ app.get('/fetch-attendance', async (req, res) => {
       throw new Error('attendance_table_not_found');
     }
 
+    console.log('✅ Attendance fetched successfully');
     await page.close();
     res.json({ ok: true, attendance });
+
   } catch (err) {
     if (page) await page.close();
     console.error('❌ Fetch error:', err);
     res.status(500).json({ error: 'scrape_failed', message: err.message });
   }
 });
+
 
 // ====== SERVER ======
 const PORT = process.env.PORT || 3000;
