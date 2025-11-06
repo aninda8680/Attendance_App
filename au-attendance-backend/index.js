@@ -9,7 +9,7 @@ const app = express();
 
 // ====== MIDDLEWARE ======
 app.use(cors());
-app.use(express.json()); // <-- MUST be before routes
+app.use(express.json());
 
 // ====== CONFIG ======
 const ENC_KEY = process.env.ENC_KEY || 'dev_secret_key_change_this';
@@ -38,10 +38,21 @@ initDB();
 // ====== PERSISTENT BROWSER ======
 async function getBrowser() {
   if (!browser) {
-    browser = await puppeteer.launch({
-      headless: true,
-      args: ['--no-sandbox', '--disable-setuid-sandbox'],
-    });
+    try {
+      browser = await puppeteer.launch({
+        headless: true,
+        args: [
+          '--no-sandbox',
+          '--disable-setuid-sandbox',
+          '--disable-dev-shm-usage',
+          '--disable-gpu',
+          '--single-process',
+        ],
+      });
+      console.log('🚀 Puppeteer browser launched');
+    } catch (e) {
+      console.error('❌ Puppeteer launch failed:', e);
+    }
   }
   return browser;
 }
@@ -55,7 +66,6 @@ app.get('/', (req, res) => res.send('attendance-proto backend running ✅'));
 app.post('/save-credentials', async (req, res) => {
   try {
     const { uid, username, password } = req.body;
-
     if (!uid) return res.status(400).json({ error: 'missing_uid' });
     if (!username) return res.status(400).json({ error: 'missing_username' });
     if (!password) return res.status(400).json({ error: 'missing_password' });
@@ -108,49 +118,45 @@ app.get('/fetch-attendance', async (req, res) => {
     await page.setViewport({ width: 1200, height: 900 });
 
     // Restore cookies if present
-    // Restore cookies if present
-if (user.cookies?.length) {
-  const validCookies = user.cookies
-    .filter(c => c.name && c.value && c.domain)
-    .map(c => ({
-      name: c.name,
-      value: c.value,
-      domain: c.domain,
-      path: c.path || '/',
-      httpOnly: c.httpOnly || false,
-      secure: c.secure || false,
-      sameSite: c.sameSite || 'Lax',
-    }));
-
-  if (validCookies.length) {
-    console.log(`🔑 Restoring ${validCookies.length} cookies`);
-    await page.setCookie(...validCookies);
-  }
-}
-
+    if (user.cookies?.length) {
+      const validCookies = user.cookies
+        .filter(c => c.name && c.value && c.domain)
+        .map(c => ({
+          name: c.name,
+          value: c.value,
+          domain: c.domain,
+          path: c.path || '/',
+          httpOnly: c.httpOnly || false,
+          secure: c.secure || false,
+          sameSite: c.sameSite || 'Lax',
+        }));
+      if (validCookies.length) {
+        console.log(`🔑 Restoring ${validCookies.length} cookies`);
+        await page.setCookie(...validCookies);
+      }
+    }
 
     // Go to attendance page first
-    await page.goto(ATT_URL, { waitUntil: 'domcontentloaded', timeout: 15000 });
+    await page.goto(ATT_URL, { waitUntil: 'domcontentloaded', timeout: 20000 });
 
     // Login if redirected
     if (page.url().includes('login')) {
       console.log('📄 Logging in...');
-      await page.goto(LOGIN_URL, { waitUntil: 'domcontentloaded', timeout: 15000 });
+      await page.goto(LOGIN_URL, { waitUntil: 'domcontentloaded', timeout: 20000 });
       await page.type('input[name="registration_no"]', username, { delay: 50 });
       await page.type('input[name="password"]', password, { delay: 50 });
 
       await Promise.all([
         page.click('#login_btn'),
-        page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 10000 }),
+        page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 15000 }),
       ]);
 
-      // Save new cookies
       const newCookies = await page.cookies();
       await usersCollection.updateOne({ uid }, { $set: { cookies: newCookies } });
     }
 
     // Fetch attendance table
-    await page.goto(ATT_URL, { waitUntil: 'domcontentloaded', timeout: 10000 });
+    await page.goto(ATT_URL, { waitUntil: 'domcontentloaded', timeout: 15000 });
     const attendance = await page.evaluate(() => {
       const table = document.querySelector('#myTable');
       if (!table) return { error: 'no_table_found', html: document.body.innerHTML.slice(0, 500) };
@@ -175,7 +181,6 @@ if (user.cookies?.length) {
 
     await page.close();
     res.json({ ok: true, attendance });
-
   } catch (err) {
     if (page) await page.close();
     console.error('❌ Fetch error:', err);
