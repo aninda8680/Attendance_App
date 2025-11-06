@@ -12,6 +12,7 @@
   "type": "commonjs",
   "dependencies": {
     "body-parser": "^1.20.2",
+    "chrome-aws-lambda": "^10.1.0",
     "cors": "^2.8.5",
     "crypto-js": "^4.2.0",
     "dotenv": "^16.4.5",

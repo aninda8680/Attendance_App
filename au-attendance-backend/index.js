@@ -185,7 +185,7 @@ app.get('/fetch-attendance', async (req, res) => {
     res.status(500).json({ error: 'scrape_failed', message: err.message });
   }
 });
-
+  
 
 // ====== SERVER ======
 const PORT = process.env.PORT || 3000;
