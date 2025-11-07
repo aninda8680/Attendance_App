@@ -1,192 +1,148 @@
-require('dotenv').config();
-const express = require('express');
-const puppeteer = require('puppeteer');
-const CryptoJS = require('crypto-js');
-const cors = require('cors');
-const { MongoClient } = require('mongodb');
+require("dotenv").config();
+const express = require("express");
+const cors = require("cors");
+const puppeteer = require("puppeteer");
+const CryptoJS = require("crypto-js");
+const { MongoClient } = require("mongodb");
 
 const app = express();
-
-// ====== MIDDLEWARE ======
 app.use(cors());
 app.use(express.json());
 
 // ====== CONFIG ======
-const ENC_KEY = process.env.ENC_KEY || 'dev_secret_key_change_this';
-const mongoUri = process.env.MONGO_URI || 'mongodb://127.0.0.1:27017/attendance_app';
-let usersCollection;
+const ENC_KEY = process.env.ENC_KEY;
+const MONGO_URI = process.env.MONGO_URI;
+const PORT = process.env.PORT || 3000;
 
-const LOGIN_URL = 'https://adamasknowledgecity.ac.in/student/login';
-const ATT_URL = 'https://adamasknowledgecity.ac.in/student/attendance';
+if (!MONGO_URI || !ENC_KEY) {
+  console.error("❌ Missing environment variables! Check .env file.");
+  process.exit(1);
+}
 
-let browser; // Persistent browser
-const chromium = require('chrome-aws-lambda');
-// ====== MONGO INIT ======
-async function initDB() {
+// ====== DATABASE CONNECTION ======
+let db;
+async function connectDB() {
   try {
-    const client = new MongoClient(mongoUri);
+    const client = new MongoClient(MONGO_URI, {
+      useNewUrlParser: true,
+      useUnifiedTopology: true,
+      ssl: true,
+    });
     await client.connect();
-    const db = client.db('attendance_app');
-    usersCollection = db.collection('users');
-    console.log('✅ MongoDB connected');
+    db = client.db("attendance");
+    console.log("✅ Connected to MongoDB Atlas");
   } catch (err) {
-    console.error('❌ MongoDB connection failed:', err);
+    console.error("❌ MongoDB connection error:", err);
+    process.exit(1);
   }
 }
-initDB();
+connectDB();
 
-// ====== PERSISTENT BROWSER ======
-async function getBrowser() {
-  if (!browser) {
-    browser = await chromium.puppeteer.launch({
-      args: chromium.args,
-      defaultViewport: chromium.defaultViewport,
-      executablePath: await chromium.executablePath,
-      headless: chromium.headless,
-    });
-    console.log('🚀 Chromium launched');
+// ====== ENCRYPTION HELPERS ======
+function encrypt(text) {
+  return CryptoJS.AES.encrypt(text, ENC_KEY).toString();
+}
+function decrypt(ciphertext) {
+  try {
+    const bytes = CryptoJS.AES.decrypt(ciphertext, ENC_KEY);
+    return bytes.toString(CryptoJS.enc.Utf8);
+  } catch {
+    return "";
   }
-  return browser;
 }
 
 // ====== ROUTES ======
+app.get("/", (req, res) => res.send("✅ Attendance backend is running!"));
 
-// Health Check
-app.get('/', (req, res) => res.send('attendance-proto backend running ✅'));
-
-// Save Credentials
-app.post('/save-credentials', async (req, res) => {
+// Save credentials
+app.post("/save-credentials", async (req, res) => {
   try {
     const { uid, username, password } = req.body;
-    if (!uid) return res.status(400).json({ error: 'missing_uid' });
-    if (!username) return res.status(400).json({ error: 'missing_username' });
-    if (!password) return res.status(400).json({ error: 'missing_password' });
+    if (!uid || !username || !password)
+      return res.status(400).json({ error: "Missing credentials" });
 
-    const cipher = CryptoJS.AES.encrypt(
-      JSON.stringify({ username, password }),
-      ENC_KEY
-    ).toString();
+    const encrypted = {
+      uid,
+      username: encrypt(username),
+      password: encrypt(password),
+      createdAt: new Date(),
+    };
 
-    await usersCollection.updateOne(
-      { uid },
-      { $set: { username, password: cipher } },
-      { upsert: true }
-    );
-
-    console.log(`✅ Saved credentials for UID: ${uid}`);
-    res.json({ ok: true });
+    await db.collection("credentials").updateOne({ uid }, { $set: encrypted }, { upsert: true });
+    res.json({ success: true, message: "Credentials saved securely!" });
   } catch (err) {
-    console.error('❌ Error in /save-credentials:', err);
-    res.status(500).json({ error: 'server_error', message: err.message });
+    console.error("Error saving creds:", err);
+    res.status(500).json({ error: "Server error" });
   }
 });
 
-// Clear Credentials
-app.post('/clear-credentials', async (req, res) => {
-  const { uid } = req.body || {};
-  if (!uid) return res.status(400).json({ error: 'missing_uid' });
-
-  await usersCollection.deleteOne({ uid });
-  console.log(`🗑️ Cleared credentials for UID: ${uid}`);
-  res.json({ ok: true });
-});
-
-// Fetch Attendance
-app.get('/fetch-attendance', async (req, res) => {
-  const { uid } = req.query;
-  if (!uid) return res.status(400).json({ error: 'missing_uid' });
-
-  const user = await usersCollection.findOne({ uid });
-  if (!user) return res.status(400).json({ error: 'no_credentials' });
-
-  const bytes = CryptoJS.AES.decrypt(user.password, ENC_KEY);
-  const creds = JSON.parse(bytes.toString(CryptoJS.enc.Utf8));
-  const { username, password } = creds;
-
-  let page;
+// Fetch attendance
+app.get("/fetch-attendance", async (req, res) => {
   try {
-    const browser = await getBrowser();
-    page = await browser.newPage();
-    await page.setViewport({ width: 1200, height: 900 });
+    const { uid } = req.query;
+    if (!uid) return res.status(400).json({ error: "Missing uid" });
 
-    console.log('🔹 Restoring cookies if any...');
-    if (user.cookies?.length) {
-      const validCookies = user.cookies
-        .filter(c => c.name && c.value && c.domain)
-        .map(c => ({
-          name: c.name,
-          value: c.value,
-          domain: c.domain,
-          path: c.path || '/',
-          httpOnly: c.httpOnly || false,
-          secure: c.secure || false,
-          sameSite: c.sameSite || 'Lax',
-        }));
-      if (validCookies.length) {
-        console.log(`🔑 Restoring ${validCookies.length} cookies`);
-        await page.setCookie(...validCookies);
-      }
-    }
+    const creds = await db.collection("credentials").findOne({ uid });
+    if (!creds) return res.status(404).json({ error: "Credentials not found" });
 
-    console.log('🔹 Navigating to attendance page...');
-    await page.goto(ATT_URL, { waitUntil: 'domcontentloaded', timeout: 20000 });
-    console.log('Current URL:', page.url());
+    const username = decrypt(creds.username);
+    const password = decrypt(creds.password);
 
-    // Login if redirected
-    if (page.url().includes('login')) {
-      console.log('📄 Redirected to login, performing login...');
-      await page.goto(LOGIN_URL, { waitUntil: 'domcontentloaded', timeout: 20000 });
-      await page.type('input[name="registration_no"]', username, { delay: 50 });
-      await page.type('input[name="password"]', password, { delay: 50 });
-
-      await Promise.all([
-        page.click('#login_btn'),
-        page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 20000 }),
-      ]);
-
-      console.log('✅ Logged in, saving new cookies...');
-      const newCookies = await page.cookies();
-      await usersCollection.updateOne({ uid }, { $set: { cookies: newCookies } });
-    }
-
-    console.log('🔹 Fetching attendance table...');
-    await page.goto(ATT_URL, { waitUntil: 'domcontentloaded', timeout: 15000 });
-    console.log('Current URL after login:', page.url());
-
-    const attendance = await page.evaluate(() => {
-      const table = document.querySelector('#myTable');
-      if (!table) return { error: 'no_table_found', html: document.body.innerHTML.slice(0, 500) };
-
-      const rows = Array.from(table.querySelectorAll('tbody tr'));
-      return rows.map(r => {
-        const cols = r.querySelectorAll('td');
-        return {
-          course: cols[0]?.innerText.trim() || '',
-          totalClasses: cols[1]?.innerText.trim() || '',
-          totalPresent: cols[2]?.innerText.trim() || '',
-          totalAbsent: cols[3]?.innerText.trim() || '',
-          percentage: cols[4]?.innerText.trim() || '',
-        };
-      });
+    console.log("Navigating to attendance page...");
+    const browser = await puppeteer.launch({
+      headless: "new",
+      args: ["--no-sandbox", "--disable-setuid-sandbox"],
     });
 
-    if (attendance.error) {
-      console.error('❌ Attendance table not found. Partial HTML:', attendance.html);
-      throw new Error('attendance_table_not_found');
-    }
+    const page = await browser.newPage();
+    await page.goto("https://auadms.adamasuniversity.ac.in/", {
+      waitUntil: "domcontentloaded",
+    });
 
-    console.log('✅ Attendance fetched successfully');
-    await page.close();
-    res.json({ ok: true, attendance });
+    console.log("Current URL:", page.url());
 
+    // TODO: update selectors as per actual portal
+    await page.type("#username", username);
+    await page.type("#password", password);
+    await Promise.all([
+      page.click("#loginBtn"),
+      page.waitForNavigation({ waitUntil: "networkidle2" }),
+    ]);
+
+    // Example extraction
+    const attendance = await page.evaluate(() => {
+      const rows = document.querySelectorAll(".attendance-row");
+      return Array.from(rows).map((row) => ({
+        course: row.querySelector(".subject")?.textContent?.trim() || "",
+        totalPresent: row.querySelector(".present")?.textContent?.trim() || "",
+        totalClasses: row.querySelector(".total")?.textContent?.trim() || "",
+        percentage: row.querySelector(".percent")?.textContent?.trim() || "",
+      }));
+    });
+
+    await browser.close();
+    res.json({ success: true, attendance });
   } catch (err) {
-    if (page) await page.close();
-    console.error('❌ Fetch error:', err);
-    res.status(500).json({ error: 'scrape_failed', message: err.message });
+    console.error("Error in fetch-attendance:", err);
+    res.status(500).json({ error: "Attendance fetch failed" });
   }
 });
-  
 
-// ====== SERVER ======
-const PORT = process.env.PORT || 3000;
-app.listen(PORT, '0.0.0.0', () => console.log(`🚀 Listening on port ${PORT}`));
+// Clear credentials
+app.post("/clear-credentials", async (req, res) => {
+  try {
+    const { uid } = req.body;
+    if (!uid) return res.status(400).json({ error: "Missing uid" });
+
+    await db.collection("credentials").deleteOne({ uid });
+    res.json({ success: true, message: "Credentials cleared" });
+  } catch (err) {
+    console.error("Error clearing creds:", err);
+    res.status(500).json({ error: "Server error" });
+  }
+});
+
+// ====== START SERVER ======
+app.listen(PORT, () => {
+  console.log(`🚀 Server running on port ${PORT}`);
+});
