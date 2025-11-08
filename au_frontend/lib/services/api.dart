@@ -3,7 +3,8 @@ import 'package:http/http.dart' as http;
 import 'package:au_frontend/models/attendance_item.dart';
 
 // TODO: Replace with your deployed Render service base URL (no trailing slash)
-const String API_BASE = 'https://YOUR-RENDER-SERVICE.onrender.com';
+const String API_BASE = 'https://attendance-app-vfsw.onrender.com';
+
 
 class Api {
   static Future<List<AttendanceItem>> fetchAttendance({
