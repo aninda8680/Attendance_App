@@ -9,64 +9,80 @@ app.use(express.json());
 
 const BASE_URL = "https://adamasknowledgecity.ac.in";
 
-// ✅ Optional root message
 app.get("/", (req, res) => {
   res.send("✅ Adamas Attendance API is live. Use POST /attendance");
 });
 
 app.post("/attendance", async (req, res) => {
   const { username, password } = req.body;
-
   if (!username || !password) {
     return res.status(400).json({ error: "Username and password required" });
   }
 
   try {
-    // 🍪 Create axios client with cookie support
+    // 🍪 Prepare cookie jar & axios client
     const jar = new CookieJar();
     const client = wrapper(axios.create({ jar, withCredentials: true }));
 
-    // STEP 1️⃣: Get login page and extract CSRF token
-    const loginPage = await client.get(`${BASE_URL}/student/login`);
+    // STEP 1️⃣: GET login page → extract CSRF token
+    const loginPage = await client.get(`${BASE_URL}/student/login`, {
+      headers: {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/122 Safari/537.36",
+      },
+    });
+
     const $ = cheerio.load(loginPage.data);
     const csrfToken = $('input[name="_token"]').val();
 
     if (!csrfToken) {
-      console.error("❌ No CSRF token found");
+      console.error("❌ CSRF token not found");
       return res.status(500).json({ error: "CSRF token not found" });
     }
 
-    // STEP 2️⃣: Log in using correct field names
+    // STEP 2️⃣: Send login POST with correct fields
+    const formData = new URLSearchParams({
+      _token: csrfToken,
+      registration_no: username,
+      password: password,
+      login: "login", // ✅ required button value for Laravel form
+    });
+
     const loginResponse = await client.post(
       `${BASE_URL}/student/login`,
-      new URLSearchParams({
-        _token: csrfToken,
-        registration_no: username, // ✅ correct field name
-        password: password,
-      }),
+      formData.toString(),
       {
         headers: {
           "Content-Type": "application/x-www-form-urlencoded",
+          "Referer": `${BASE_URL}/student/login`,
+          "Origin": BASE_URL,
+          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/122 Safari/537.36",
         },
         maxRedirects: 0,
-        validateStatus: (status) => status < 500,
+        validateStatus: (s) => s < 500,
       }
     );
 
+    console.log("🔍 Login status:", loginResponse.status);
+
     if (loginResponse.status !== 302) {
-      console.log("❌ Login failed. Status:", loginResponse.status);
+      console.log("❌ Login failed. Probably invalid credentials or CSRF.");
       return res.status(401).json({ error: "Invalid username or password" });
     }
 
-    // STEP 3️⃣: Request attendance page
-    const attendancePage = await client.get(`${BASE_URL}/student/attendance`);
-    const $$ = cheerio.load(attendancePage.data);
+    // STEP 3️⃣: Fetch attendance page
+    const attendancePage = await client.get(`${BASE_URL}/student/attendance`, {
+      headers: {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/122 Safari/537.36",
+        "Referer": `${BASE_URL}/student/dashboard`,
+      },
+    });
 
+    const $$ = cheerio.load(attendancePage.data);
     const attendanceData = [];
 
-    // ✅ Correct selector for attendance table
+    // ✅ Parse attendance table (#myTable)
     $$('#myTable tbody tr').each((i, row) => {
-      const cols = $$(row).find('td');
+      const cols = $$(row).find("td");
       if (cols.length >= 5) {
         attendanceData.push({
           subject: $$(cols[0]).text().trim(),
@@ -79,7 +95,7 @@ app.post("/attendance", async (req, res) => {
     });
 
     if (attendanceData.length === 0) {
-      console.log("⚠️ No rows found in #myTable");
+      console.log("⚠️ No rows found in #myTable – possible login redirect.");
       return res.status(200).json({
         success: true,
         attendance: [],
@@ -87,7 +103,6 @@ app.post("/attendance", async (req, res) => {
       });
     }
 
-    // ✅ Success response
     res.json({
       success: true,
       attendance: attendanceData,
@@ -99,6 +114,5 @@ app.post("/attendance", async (req, res) => {
   }
 });
 
-// ✅ Use Render's dynamic port
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => console.log("✅ Server running on port", PORT));
