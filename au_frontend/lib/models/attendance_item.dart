@@ -1,3 +1,4 @@
+//models/attendance_item.dart
 class AttendanceItem {
   final String subject;
   final String totalClasses;
