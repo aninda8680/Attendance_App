@@ -13,41 +13,38 @@ app.get("/", (req, res) => {
   res.send("✅ Adamas Attendance API is live. Use POST /attendance");
 });
 
-
 app.post("/attendance", async (req, res) => {
   const { username, password } = req.body;
+  if (!username || !password) {
+    return res.status(400).json({ error: "Username and password required" });
+  }
 
   try {
-    console.log("🔵 Starting login flow for:", username);
-
+    // 🍪 Prepare cookie jar & axios client
     const jar = new CookieJar();
     const client = wrapper(axios.create({ jar, withCredentials: true }));
 
-    // Step 1: Load login page
-    console.log("🔵 Fetching login page...");
-    const loginPage = await client.get(`${BASE_URL}/student/login`);
-
-    console.log("✅ Login page status:", loginPage.status);
-    console.log("✅ Cookies after GET:", jar.toJSON());
+    // STEP 1️⃣: GET login page → extract CSRF token
+    const loginPage = await client.get(`${BASE_URL}/student/login`, {
+      headers: {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/122 Safari/537.36",
+      },
+    });
 
     const $ = cheerio.load(loginPage.data);
     const csrfToken = $('input[name="_token"]').val();
 
-    console.log("✅ Extracted CSRF:", csrfToken);
-
     if (!csrfToken) {
-      console.log("❌ CSRF missing. Page dump:");
-      console.log(loginPage.data.substring(0, 500));
-      return res.status(500).json({ error: "CSRF token extraction failed" });
+      console.error("❌ CSRF token not found");
+      return res.status(500).json({ error: "CSRF token not found" });
     }
 
-    // Step 2: Login
-    console.log("🔵 Sending login POST...");
+    // STEP 2️⃣: Send login POST with correct fields
     const formData = new URLSearchParams({
       _token: csrfToken,
       registration_no: username,
       password: password,
-      login: "login",
+      login: "login", // ✅ required button value for Laravel form
     });
 
     const loginResponse = await client.post(
@@ -56,53 +53,64 @@ app.post("/attendance", async (req, res) => {
       {
         headers: {
           "Content-Type": "application/x-www-form-urlencoded",
-          Referer: `${BASE_URL}/student/login`,
+          "Referer": `${BASE_URL}/student/login`,
+          "Origin": BASE_URL,
+          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/122 Safari/537.36",
         },
         maxRedirects: 0,
-        validateStatus: () => true
+        validateStatus: (s) => s < 500,
       }
     );
 
-    console.log("✅ Login response status:", loginResponse.status);
-    console.log("✅ Cookies after login:", jar.toJSON());
+    console.log("🔍 Login status:", loginResponse.status);
 
     if (loginResponse.status !== 302) {
-      console.log("❌ Login failed. Body snippet:");
-      console.log(loginResponse.data.substring(0, 300));
-      return res.status(401).json({
-        error: "Login failed — incorrect credentials OR form changed."
+      console.log("❌ Login failed. Probably invalid credentials or CSRF.");
+      return res.status(401).json({ error: "Invalid username or password" });
+    }
+
+    // STEP 3️⃣: Fetch attendance page
+    const attendancePage = await client.get(`${BASE_URL}/student/attendance`, {
+      headers: {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/122 Safari/537.36",
+        "Referer": `${BASE_URL}/student/dashboard`,
+      },
+    });
+
+    const $$ = cheerio.load(attendancePage.data);
+    const attendanceData = [];
+
+    // ✅ Parse attendance table (#myTable)
+    $$('#myTable tbody tr').each((i, row) => {
+      const cols = $$(row).find("td");
+      if (cols.length >= 5) {
+        attendanceData.push({
+          subject: $$(cols[0]).text().trim(),
+          total_classes: $$(cols[1]).text().trim(),
+          total_present: $$(cols[2]).text().trim(),
+          total_absent: $$(cols[3]).text().trim(),
+          percent: $$(cols[4]).text().trim(),
+        });
+      }
+    });
+
+    if (attendanceData.length === 0) {
+      console.log("⚠️ No rows found in #myTable – possible login redirect.");
+      return res.status(200).json({
+        success: true,
+        attendance: [],
+        message: "No attendance data found — possibly invalid session.",
       });
     }
 
-    // Step 3: Attendance page
-    console.log("🔵 Fetching attendance page...");
-    const attendancePage = await client.get(`${BASE_URL}/student/attendance`);
-
-    console.log("✅ Attendance page status:", attendancePage.status);
-
-    const $$ = cheerio.load(attendancePage.data);
-    const rows = $$("#myTable tbody tr");
-
-    console.log("✅ Rows found:", rows.length);
-
-    const attendanceData = [];
-    rows.each((i, r) => {
-      const c = $$(r).find("td");
-      attendanceData.push({
-        subject: $$(c[0]).text().trim(),
-        total_classes: $$(c[1]).text().trim(),
-        total_present: $$(c[2]).text().trim(),
-        total_absent: $$(c[3]).text().trim(),
-        percent: $$(c[4]).text().trim()
-      });
+    res.json({
+      success: true,
+      attendance: attendanceData,
+      total_subjects: attendanceData.length,
     });
-
-    return res.json({ success: true, attendance: attendanceData });
-
-  } catch (e) {
-    console.log("❌ FULL ERROR:");
-    console.log(e);
-    return res.status(500).json({ error: "Server crashed — check logs" });
+  } catch (err) {
+    console.error("❌ Error fetching attendance:", err);
+    res.status(500).json({ error: "Something went wrong" });
   }
 });
 
