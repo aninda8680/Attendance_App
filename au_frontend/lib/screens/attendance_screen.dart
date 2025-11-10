@@ -471,20 +471,29 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
             crossAxisAlignment: CrossAxisAlignment.end,
             children: [
               FloatingActionButton(
-                heroTag: "btn_bunk",
-                onPressed: () async {
-                  final data = await _future;
-                  if (!mounted) return;
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (_) => BunkCalculatorScreen(items: data),
-                    ),
-                  );
-                },
-                backgroundColor: Colors.deepOrange,
-                child: const Icon(Icons.calculate),
-              ),
+  heroTag: "btn_bunk",
+  onPressed: () async {
+    final data = await _future;
+    if (!mounted) return;
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => BunkCalculatorScreen(items: data),
+      ),
+    );
+  },
+  backgroundColor: Colors.deepOrange,
+  child: const Text(
+    "BUNK?",
+    style: TextStyle(
+      fontWeight: FontWeight.bold,
+      fontSize: 14,
+      color: Colors.white,
+      letterSpacing: 1.2,
+    ),
+  ),
+),
+
               const SizedBox(height: 12),
               FloatingActionButton(
                 heroTag: "btn_refresh",
