@@ -7,7 +7,6 @@ import 'login_screen.dart';
 import 'dart:math' as math;
 import 'bunk_calculator_screen.dart';
 import 'loading.dart';
-import 'package:au_frontend/services/update_service.dart';
 
 class AttendanceScreen extends StatefulWidget {
   const AttendanceScreen({super.key});
@@ -23,7 +22,6 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
   void initState() {
     super.initState();
     _future = _load();
-    _checkForUpdate();
   }
 
   Future<List<AttendanceItem>> _load() async {
@@ -32,14 +30,6 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
     if (u == null || p == null) throw Exception('Missing credentials');
     return Api.fetchAttendance(username: u, password: p);
   }
-
-  Future<void> _checkForUpdate() async {
-  final update = await UpdateService.checkForUpdate();
-  if (update != null && mounted) {
-    _showUpdateDialog(update);
-  }
-}
-
 
   Future<void> _refresh() async {
     setState(() => _future = _load());
@@ -59,70 +49,6 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
       (route) => false,
     );
   }
-
-  void _showUpdateDialog(UpdateInfo update) {
-  showDialog(
-    context: context,
-    barrierDismissible: false,
-    builder: (context) {
-      double progress = 0.0;
-      bool downloading = false;
-
-      return StatefulBuilder(
-        builder: (context, setState) {
-          return AlertDialog(
-            title: Text("Update Available (${update.version})"),
-            content: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(update.changelog),
-                const SizedBox(height: 16),
-                if (downloading)
-                  Column(
-                    children: [
-                      LinearProgressIndicator(value: progress),
-                      const SizedBox(height: 8),
-                      Text("${(progress * 100).toStringAsFixed(0)}%"),
-                    ],
-                  ),
-              ],
-            ),
-            actions: [
-              TextButton(
-                onPressed: downloading ? null : () => Navigator.pop(context),
-                child: const Text("Later"),
-              ),
-              ElevatedButton(
-                onPressed: downloading
-                    ? null
-                    : () async {
-                        setState(() {
-                          downloading = true;
-                          progress = 0;
-                        });
-
-                        final path = await UpdateService.downloadApk(
-                          update.url,
-                          (p) => setState(() => progress = p),
-                        );
-
-                        if (path != null) {
-                          await UpdateService.installApk(path);
-                        }
-
-                        Navigator.pop(context);
-                      },
-                child: Text(downloading ? "Downloading..." : "Update"),
-              ),
-            ],
-          );
-        },
-      );
-    },
-  );
-}
-
 
   @override
   Widget build(BuildContext context) {
@@ -460,51 +386,43 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
         },
       ),
       floatingActionButton: FutureBuilder<List<AttendanceItem>>(
-        future: _future,
-        builder: (context, snap) {
-          if (snap.connectionState == ConnectionState.waiting) {
-            return const SizedBox.shrink(); // ✅ Hide FABs while loading
-          }
+  future: _future,
+  builder: (context, snap) {
+    if (snap.connectionState == ConnectionState.waiting) {
+      return const SizedBox.shrink(); // ✅ Hide FABs while loading
+    }
 
-          return Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.end,
-            children: [
-              FloatingActionButton(
-  heroTag: "btn_bunk",
-  onPressed: () async {
-    final data = await _future;
-    if (!mounted) return;
-    Navigator.push(
-      context,
-      MaterialPageRoute(
-        builder: (_) => BunkCalculatorScreen(items: data),
-      ),
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.end,
+      children: [
+        FloatingActionButton(
+          heroTag: "btn_bunk",
+          onPressed: () async {
+            final data = await _future;
+            if (!mounted) return;
+            Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (_) => BunkCalculatorScreen(items: data),
+              ),
+            );
+          },
+          backgroundColor: Colors.deepOrange,
+          child: const Icon(Icons.calculate),
+        ),
+        const SizedBox(height: 12),
+        FloatingActionButton(
+          heroTag: "btn_refresh",
+          onPressed: _refresh,
+          backgroundColor: Colors.indigo,
+          child: const Icon(Icons.refresh, color: Colors.white),
+        ),
+      ],
     );
   },
-  backgroundColor: Colors.deepOrange,
-  child: const Text(
-    "BUNK?",
-    style: TextStyle(
-      fontWeight: FontWeight.bold,
-      fontSize: 14,
-      color: Colors.white,
-      letterSpacing: 1.2,
-    ),
-  ),
 ),
 
-              const SizedBox(height: 12),
-              FloatingActionButton(
-                heroTag: "btn_refresh",
-                onPressed: _refresh,
-                backgroundColor: Colors.indigo,
-                child: const Icon(Icons.refresh, color: Colors.white),
-              ),
-            ],
-          );
-        },
-      ),
     );
   }
 
