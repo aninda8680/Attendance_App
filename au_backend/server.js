@@ -13,6 +13,14 @@ app.get("/", (req, res) => {
   res.send("✅ Adamas Attendance API is live. Use POST /attendance");
 });
 
+// Simple ping route for uptime monitoring
+app.get("/ping", (req, res) => {
+  res.status(200).json({
+    status: "ok",
+    now: new Date().toISOString()
+  });
+});
+
 app.post("/attendance", async (req, res) => {
   const { username, password } = req.body;
   if (!username || !password) {
