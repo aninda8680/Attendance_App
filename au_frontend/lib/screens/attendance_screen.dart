@@ -140,9 +140,23 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
             return RefreshIndicator(
               onRefresh: _refresh,
               child: ListView(
-                children: const [
-                  SizedBox(height: 160),
-                  Center(child: Text('No attendance data found')),
+                children: [
+                  const SizedBox(height: 160),
+                  const Center(
+                    child: Text(
+                    'No attendance data found. \nPlease check your Reg no. or Password.',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(fontSize: 16, fontWeight: FontWeight.w500),
+                    ),
+                  ),
+                  const SizedBox(height: 20),
+                  Center(
+                    child: FilledButton.icon(
+                      onPressed: _logout,
+                      icon: const Icon(Icons.logout),
+                      label: const Text('Logout'),
+                    ),
+                  ),
                 ],
               ),
             );
@@ -385,7 +399,9 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
           );
         },
       ),
-      floatingActionButton: FutureBuilder<List<AttendanceItem>>(
+
+
+floatingActionButton: FutureBuilder<List<AttendanceItem>>(
   future: _future,
   builder: (context, snap) {
     if (snap.connectionState == ConnectionState.waiting) {
@@ -397,20 +413,30 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
       crossAxisAlignment: CrossAxisAlignment.end,
       children: [
         FloatingActionButton(
-          heroTag: "btn_bunk",
-          onPressed: () async {
-            final data = await _future;
-            if (!mounted) return;
-            Navigator.push(
-              context,
-              MaterialPageRoute(
-                builder: (_) => BunkCalculatorScreen(items: data),
-              ),
-            );
-          },
-          backgroundColor: Colors.deepOrange,
-          child: const Icon(Icons.calculate),
-        ),
+  heroTag: "btn_bunk",
+  onPressed: () async {
+    final data = await _future;
+    if (!mounted) return;
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => BunkCalculatorScreen(items: data),
+      ),
+    );
+  },
+  backgroundColor: Colors.deepOrange,
+  child: const Text(
+    "BUNK?",
+    style: TextStyle(
+      fontWeight: FontWeight.bold,
+      fontSize: 14,
+      color: Colors.white,
+      letterSpacing: 1.2,
+    ),
+  ),
+),
+
+
         const SizedBox(height: 12),
         FloatingActionButton(
           heroTag: "btn_refresh",
@@ -502,12 +528,35 @@ class _ErrorView extends StatelessWidget {
           children: [
             const Icon(Icons.error_outline, size: 48, color: Colors.redAccent),
             const SizedBox(height: 12),
-            Text(message, textAlign: TextAlign.center),
-            const SizedBox(height: 12),
-            FilledButton.icon(
-              onPressed: () => onRetry(),
-              icon: const Icon(Icons.refresh),
-              label: const Text('Try Again'),
+            Text(
+              message,
+              textAlign: TextAlign.center,
+              style: const TextStyle(fontSize: 16),
+            ),
+            const SizedBox(height: 20),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                FilledButton.icon(
+                  onPressed: () => onRetry(),
+                  icon: const Icon(Icons.refresh),
+                  label: const Text('Try Again'),
+                ),
+                const SizedBox(width: 12),
+                FilledButton.icon(
+                  onPressed: () {
+                    Navigator.of(context).pushAndRemoveUntil(
+                      MaterialPageRoute(builder: (_) => const LoginScreen()),
+                      (route) => false,
+                    );
+                  },
+                  icon: const Icon(Icons.logout),
+                  label: const Text('Logout'),
+                  style: FilledButton.styleFrom(
+                    backgroundColor: Colors.redAccent,
+                  ),
+                ),
+              ],
             ),
           ],
         ),
@@ -515,3 +564,4 @@ class _ErrorView extends StatelessWidget {
     );
   }
 }
+
