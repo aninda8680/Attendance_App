@@ -41,7 +41,7 @@ class Api {
       final data = jsonDecode(resp.body) as Map<String, dynamic>;
       throw ApiError(data['error']?.toString() ?? 'Unknown error');
     } catch (_) {
-      throw ApiError('Network/Server error (${resp.statusCode})');
+      throw ApiError('Unable to fetch data — the university server is not responding. Please try again later. \nNetwork/Server error (${resp.statusCode})');
     }
   }
 }

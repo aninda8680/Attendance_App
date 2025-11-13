@@ -7,6 +7,9 @@ import 'login_screen.dart';
 import 'dart:math' as math;
 import 'bunk_calculator_screen.dart';
 import 'loading.dart';
+import 'package:au_frontend/components/animated_action_button.dart';
+import 'package:au_frontend/components/attendance_fab.dart';
+
 
 class AttendanceScreen extends StatefulWidget {
   const AttendanceScreen({super.key});
@@ -137,30 +140,37 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
 
           final items = snap.data ?? [];
           if (items.isEmpty) {
-            return RefreshIndicator(
-              onRefresh: _refresh,
-              child: ListView(
-                children: [
-                  const SizedBox(height: 160),
-                  const Center(
-                    child: Text(
-                    'No attendance data found. \nPlease check your Reg no. or Password.',
-                    textAlign: TextAlign.center,
-                    style: TextStyle(fontSize: 16, fontWeight: FontWeight.w500),
+              return RefreshIndicator(
+                onRefresh: _refresh,
+                child: ListView(
+                  children: [
+                    const SizedBox(height: 160),
+                    const Center(
+                      child: Text(
+                        'No attendance data found.\nPlease check your username or password.',
+                        textAlign: TextAlign.center,
+                        style: TextStyle(fontSize: 16, fontWeight: FontWeight.w500),
+                      ),
                     ),
-                  ),
-                  const SizedBox(height: 20),
-                  Center(
-                    child: FilledButton.icon(
-                      onPressed: _logout,
-                      icon: const Icon(Icons.logout),
-                      label: const Text('Logout'),
+                    const SizedBox(height: 20),
+                    Center(
+                      child: AnimatedActionButton(
+                        onPressed: _logout,
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: const [
+                            Icon(Icons.logout),
+                            SizedBox(width: 8),
+                            Text('Logout'),
+                          ],
+                        ),
+                      ),
                     ),
-                  ),
-                ],
-              ),
-            );
-          }
+                  ],
+                ),
+              );
+            }
+
 
           final avg = _calcAverage(items);
           final username = SecureStore.readUsername();
@@ -401,53 +411,11 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
       ),
 
 
-floatingActionButton: FutureBuilder<List<AttendanceItem>>(
+floatingActionButton: AttendanceFAB(
   future: _future,
-  builder: (context, snap) {
-    if (snap.connectionState == ConnectionState.waiting) {
-      return const SizedBox.shrink(); // ✅ Hide FABs while loading
-    }
-
-    return Column(
-      mainAxisSize: MainAxisSize.min,
-      crossAxisAlignment: CrossAxisAlignment.end,
-      children: [
-        FloatingActionButton(
-  heroTag: "btn_bunk",
-  onPressed: () async {
-    final data = await _future;
-    if (!mounted) return;
-    Navigator.push(
-      context,
-      MaterialPageRoute(
-        builder: (_) => BunkCalculatorScreen(items: data),
-      ),
-    );
-  },
-  backgroundColor: Colors.deepOrange,
-  child: const Text(
-    "BUNK?",
-    style: TextStyle(
-      fontWeight: FontWeight.bold,
-      fontSize: 14,
-      color: Colors.white,
-      letterSpacing: 1.2,
-    ),
-  ),
+  onRefresh: _refresh,
 ),
 
-
-        const SizedBox(height: 12),
-        FloatingActionButton(
-          heroTag: "btn_refresh",
-          onPressed: _refresh,
-          backgroundColor: Colors.indigo,
-          child: const Icon(Icons.refresh, color: Colors.white),
-        ),
-      ],
-    );
-  },
-),
 
     );
   }
@@ -534,26 +502,42 @@ class _ErrorView extends StatelessWidget {
               style: const TextStyle(fontSize: 16),
             ),
             const SizedBox(height: 20),
+
+            // 🔹 Animated Action Buttons Row
             Row(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                FilledButton.icon(
+                // Retry Button
+                AnimatedActionButton(
                   onPressed: () => onRetry(),
-                  icon: const Icon(Icons.refresh),
-                  label: const Text('Try Again'),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: const [
+                      Icon(Icons.refresh),
+                      SizedBox(width: 8),
+                      Text('Try Again'),
+                    ],
+                  ),
                 ),
                 const SizedBox(width: 12),
-                FilledButton.icon(
+
+                // Logout Button (appears slightly later)
+                AnimatedActionButton(
+                  delay: const Duration(milliseconds: 200),
                   onPressed: () {
                     Navigator.of(context).pushAndRemoveUntil(
                       MaterialPageRoute(builder: (_) => const LoginScreen()),
                       (route) => false,
                     );
                   },
-                  icon: const Icon(Icons.logout),
-                  label: const Text('Logout'),
-                  style: FilledButton.styleFrom(
-                    backgroundColor: Colors.redAccent,
+                  backgroundColor: Colors.redAccent,
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: const [
+                      Icon(Icons.logout),
+                      SizedBox(width: 8),
+                      Text('Logout'),
+                    ],
                   ),
                 ),
               ],
@@ -564,4 +548,5 @@ class _ErrorView extends StatelessWidget {
     );
   }
 }
+
 
