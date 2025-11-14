@@ -31,11 +31,20 @@ class AttendanceFAB extends StatelessWidget {
                 final data = await future;
                 if (!context.mounted) return;
                 Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    builder: (_) => BunkCalculatorScreen(items: data),
-                  ),
-                );
+  context,
+  PageRouteBuilder(
+    pageBuilder: (_, __, ___) => BunkCalculatorScreen(items: data),
+    transitionsBuilder: (_, animation, __, child) {
+      final offsetAnim = Tween(
+        begin: const Offset(1, 0),
+        end: Offset.zero,
+      ).animate(animation);
+
+      return SlideTransition(position: offsetAnim, child: child);
+    },
+  ),
+);
+
               },
               backgroundColor: Colors.deepOrange,
               child: const Text(

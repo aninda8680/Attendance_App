@@ -55,6 +55,12 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
 
   @override
   Widget build(BuildContext context) {
+
+    final width = MediaQuery.of(context).size.width;
+    final height = MediaQuery.of(context).size.height;
+    final isSmall = height < 700 || width < 360;
+
+
     return Scaffold(
       backgroundColor: const Color.fromARGB(255, 225, 229, 255),
       body: FutureBuilder<List<AttendanceItem>>(
@@ -188,7 +194,7 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
               slivers: [
                 SliverAppBar(
                   pinned: true,
-                  expandedHeight: 200,
+                  expandedHeight: isSmall ? 150 : 200,
                   backgroundColor: headerGradient.last,
                   surfaceTintColor: Colors.transparent,
                   centerTitle: true,
@@ -197,7 +203,8 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
                     builder: (BuildContext context, BoxConstraints constraints) {
                       final double expandRatio =
                           ((constraints.maxHeight - kToolbarHeight) /
-                                  (200 - kToolbarHeight))
+                            ((isSmall ? 130 : 200) - kToolbarHeight))
+
                               .clamp(
                                 0.0,
                                 1.0,
@@ -230,9 +237,9 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
                                 expandRatio, // ✅ Fades out while collapsing
                             child: SingleChildScrollView(
                               child: Padding(
-                                padding: const EdgeInsets.fromLTRB(
+                                padding: EdgeInsets.fromLTRB(
                                   20,
-                                  60,
+                                  isSmall ? 40 : 60,
                                   20,
                                   16,
                                 ),
@@ -245,7 +252,9 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
                                       mainAxisAlignment: MainAxisAlignment.end,
                                       children: [
                                         Text(
-                                          "My Attendance",
+                                        "My Attendance",
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
                                           style: TextStyle(
                                             color: Colors.white.withOpacity(
                                               0.9,
@@ -258,6 +267,8 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
                                         // const SizedBox(height: 4),
                                         Text(
                                           "Adamas University",
+                                          maxLines: 1,
+                                          overflow: TextOverflow.ellipsis,
                                           style: TextStyle(
                                             color: Colors.white.withOpacity(
                                               0.9,
@@ -271,6 +282,8 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
                                           snap.data != null
                                               ? "Reg No: ${snap.data}"
                                               : "Loading user...",
+                                              maxLines: 1,
+                                              overflow: TextOverflow.ellipsis,
                                           style: const TextStyle(
                                             color: Colors.white,
                                             fontSize: 16,
@@ -279,23 +292,27 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
                                         ),
                                         const SizedBox(height: 10),
                                         Row(
-                                          children: [
-                                            _MiniStatCard(
-                                              icon: Icons.book_outlined,
-                                              label: "Subjects",
-                                              value: items.length.toString(),
-                                              color: Colors.white,
-                                            ),
-                                            const SizedBox(width: 16),
-                                            _MiniStatCard(
-                                              icon: Icons.trending_up,
-                                              label: "Average",
-                                              value:
-                                                  "${avg.toStringAsFixed(1)}%",
-                                              color: Colors.white,
-                                            ),
-                                          ],
-                                        ),
+                                            children: [
+                                              Expanded(
+                                                child: _MiniStatCard(
+                                                  icon: Icons.book_outlined,
+                                                  label: "Subjects",
+                                                  value: items.length.toString(),
+                                                  color: Colors.white,
+                                                ),
+                                              ),
+                                              SizedBox(width: 10),
+                                              Expanded(
+                                                child: _MiniStatCard(
+                                                  icon: Icons.trending_up,
+                                                  label: "Average",
+                                                  value: "${avg.toStringAsFixed(1)}%",
+                                                  color: Colors.white,
+                                                ),
+                                              ),
+                                            ],
+                                          ),
+
                                       ],
                                     );
                                   },
@@ -348,7 +365,8 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
                           contentPadding: const EdgeInsets.all(16),
                           title: Text(
                             it.subject,
-                            maxLines: 2,
+                            maxLines: 3,
+                            softWrap: true,
                             overflow: TextOverflow.ellipsis,
                             style: const TextStyle(
                               fontWeight: FontWeight.w600,
@@ -383,19 +401,44 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
                                 ),
                                 const SizedBox(height: 6),
                                 Row(
-                                  mainAxisAlignment:
-                                      MainAxisAlignment.spaceBetween,
-                                  children: [
-                                    Text(
-                                      "Attendance: ${it.percent}",
-                                      style: TextStyle(
-                                        color: color,
-                                        fontWeight: FontWeight.bold,
-                                      ),
-                                    ),
-                                    Icon(Icons.circle, size: 10, color: color),
-                                  ],
-                                ),
+  children: [
+    TweenAnimationBuilder<double>(
+      duration: const Duration(milliseconds: 500),
+      tween: Tween(begin: 0, end: 1),
+      curve: Curves.easeOut,
+      builder: (context, value, child) {
+        return Opacity(
+          opacity: value,
+          child: Transform.translate(
+            offset: Offset(0, (1 - value) * 6), // small slide-up
+            child: child,
+          ),
+        );
+      },
+      child: Text(
+        "Attendance: ${it.percent}",
+        style: TextStyle(
+          color: color,
+          fontWeight: FontWeight.bold,
+        ),
+      ),
+    ),
+    const SizedBox(width: 6),
+    TweenAnimationBuilder<double>(
+      duration: const Duration(milliseconds: 500),
+      tween: Tween(begin: 0, end: 1),
+      builder: (context, value, child) {
+        return Transform.scale(
+          scale: value,
+          child: child,
+        );
+      },
+      child: Icon(Icons.circle, size: 10, color: color),
+    ),
+  ],
+),
+
+
                               ],
                             ),
                           ),
@@ -403,6 +446,7 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
                       );
                     }, childCount: items.length),
                   ),
+
                 ),
               ],
             ),
@@ -411,10 +455,13 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
       ),
 
 
-floatingActionButton: AttendanceFAB(
-  future: _future,
-  onRefresh: _refresh,
+floatingActionButton: SafeArea(
+  child: AttendanceFAB(
+    future: _future,
+    onRefresh: _refresh,
+  ),
 ),
+
 
 
     );
@@ -451,31 +498,39 @@ class _MiniStatCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Expanded(
-      child: Container(
-        padding: const EdgeInsets.all(12),
-        decoration: BoxDecoration(
-          color: Colors.white.withOpacity(0.2),
-          borderRadius: BorderRadius.circular(12),
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Icon(icon, color: color, size: 22),
-            const SizedBox(height: 4),
-            Text(
-              label,
-              style: TextStyle(color: color.withOpacity(0.8), fontSize: 12),
+      child: LayoutBuilder(
+        builder: (_, constraints) {
+          return Container(
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: Colors.white.withOpacity(0.2),
+              borderRadius: BorderRadius.circular(12),
             ),
-            Text(
-              value,
-              style: TextStyle(
-                color: color,
-                fontWeight: FontWeight.bold,
-                fontSize: 16,
+            child: FittedBox(
+              alignment: Alignment.topLeft,
+              fit: BoxFit.scaleDown,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Icon(icon, color: color, size: 22),
+                  const SizedBox(height: 4),
+                  Text(
+                    label,
+                    style: TextStyle(color: color.withOpacity(0.8), fontSize: 12),
+                  ),
+                  Text(
+                    value,
+                    style: TextStyle(
+                      color: color,
+                      fontWeight: FontWeight.bold,
+                      fontSize: 16,
+                    ),
+                  ),
+                ],
               ),
             ),
-          ],
-        ),
+          );
+        },
       ),
     );
   }
