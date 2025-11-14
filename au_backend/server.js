@@ -81,7 +81,7 @@ app.post("/attendance", async (req, res) => {
     const attendanceData = [];
 
     // ✅ Parse attendance table (#myTable)
-    $$('#myTable tbody tr').each((i, row) => {
+    $$('.routine1 table tbody tr').each((i, row) => {
       const cols = $$(row).find("td");
       if (cols.length >= 5) {
         attendanceData.push({
