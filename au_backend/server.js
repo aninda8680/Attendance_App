@@ -114,5 +114,123 @@ app.post("/attendance", async (req, res) => {
   }
 });
 
+
+app.post("/routine", async (req, res) => {
+  const { username, password, date } = req.body;
+
+  if (!username || !password || !date) {
+    return res.status(400).json({ error: "username, password, date required" });
+  }
+
+  try {
+    const jar = new CookieJar();
+    const client = wrapper(axios.create({ jar, withCredentials: true }));
+
+    // STEP 1: GET login page → extract CSRF
+    const loginPage = await client.get(`${BASE_URL}/student/login`);
+    const $ = cheerio.load(loginPage.data);
+    const csrfToken = $('input[name="_token"]').val();
+
+    if (!csrfToken) {
+      return res.status(500).json({ error: "CSRF not found" });
+    }
+
+    // STEP 2: POST login form
+    const formData = new URLSearchParams({
+      _token: csrfToken,
+      registration_no: username,
+      password,
+      login: "login",
+    });
+
+    const loginResponse = await client.post(
+      `${BASE_URL}/student/login`,
+      formData.toString(),
+      {
+        headers: {
+          "Content-Type": "application/x-www-form-urlencoded",
+        },
+        maxRedirects: 0,
+        validateStatus: (s) => s < 500,
+      }
+    );
+
+    if (loginResponse.status !== 302) {
+      return res.status(401).json({ error: "Invalid login" });
+    }
+
+    // STEP 3: Format the date
+    // Expecting input from app as: 2025-11-15
+    const d = new Date(date);
+    const dd = d.getDate().toString().padStart(2, "0");
+    const mm = (d.getMonth() + 1).toString().padStart(2, "0");
+    const yyyy = d.getFullYear();
+    const formattedDate = `${dd}-${mm}-${yyyy}`;
+
+    // STEP 4: Fetch routine page
+    const routinePage = await client.get(
+      `${BASE_URL}/student/routine?pre=${formattedDate}`,
+      {
+        headers: {
+          "User-Agent": "Mozilla/5.0",
+        },
+      }
+    );
+
+    const $$ = cheerio.load(routinePage.data);
+
+    // STEP 5: Parse routine table
+    const periods = [];
+
+    $$('.routine1 table tbody tr').each((i, row) => {
+      const tds = $$(row).find("td");
+
+      // first td = weekday+date, skip it
+      tds.slice(1).each((j, cell) => {
+        let subject = $$(cell).find(".class-subject").text().trim();
+        let teacher = $$(cell).find(".class-teacher").text().trim();
+        let room = $$(cell).find(".bulding-room").text().trim();
+
+        let attendance = "";
+        if ($$(cell).find(".attendance_status_present").length > 0)
+          attendance = "P";
+        if ($$(cell).find(".attendance_status_absent").length > 0)
+          attendance = "A";
+
+        const colspan = parseInt($$(cell).attr("colspan")) || 1;
+
+        if (subject || teacher || room) {
+          periods.push({
+            subject,
+            teacher,
+            room,
+            attendance,
+            periodIndex: j + 1,
+            colspan,
+          });
+        }
+      });
+    });
+
+    // Extract day name + date from first row
+    const firstDayCell = $$('#routineTable tbody tr td.week-day').first();
+    const dayName = firstDayCell.contents().first().text().trim() || "";
+    const dayDate = firstDayCell.find("br").next().text().trim() || "";
+
+    return res.json({
+      success: true,
+      selected: formattedDate,
+      dayName,
+      dayDate,
+      periods,
+    });
+
+  } catch (err) {
+    console.error("Routine error:", err);
+    return res.status(500).json({ error: "Routine fetch failed" });
+  }
+});
+
+
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => console.log("✅ Server running on port", PORT));
