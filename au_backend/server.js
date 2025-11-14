@@ -159,8 +159,7 @@ app.post("/routine", async (req, res) => {
       return res.status(401).json({ error: "Invalid login" });
     }
 
-    // STEP 3: Format the date
-    // Expecting input from app as: 2025-11-15
+    // STEP 3: Format date
     const d = new Date(date);
     const dd = d.getDate().toString().padStart(2, "0");
     const mm = (d.getMonth() + 1).toString().padStart(2, "0");
@@ -171,52 +170,73 @@ app.post("/routine", async (req, res) => {
     const routinePage = await client.get(
       `${BASE_URL}/student/routine?pre=${formattedDate}`,
       {
-        headers: {
-          "User-Agent": "Mozilla/5.0",
-        },
+        headers: { "User-Agent": "Mozilla/5.0" },
       }
     );
 
     const $$ = cheerio.load(routinePage.data);
 
-    // STEP 5: Parse routine table
+    // STEP 5: Parse routine table correctly
     const periods = [];
 
+    // Find correct row based on date
+    let correctRow = null;
+
     $$('.routine1 table tbody tr').each((i, row) => {
-      const tds = $$(row).find("td");
+      const cell = $$(row).find("td.week-day");
+      const dateText = cell.text().trim();
 
-      // first td = weekday+date, skip it
-      tds.slice(1).each((j, cell) => {
-        let subject = $$(cell).find(".class-subject").text().trim();
-        let teacher = $$(cell).find(".class-teacher").text().trim();
-        let room = $$(cell).find(".bulding-room").text().trim();
-
-        let attendance = "";
-        if ($$(cell).find(".attendance_status_present").length > 0)
-          attendance = "P";
-        if ($$(cell).find(".attendance_status_absent").length > 0)
-          attendance = "A";
-
-        const colspan = parseInt($$(cell).attr("colspan")) || 1;
-
-        if (subject || teacher || room) {
-          periods.push({
-            subject,
-            teacher,
-            room,
-            attendance,
-            periodIndex: j + 1,
-            colspan,
-          });
-        }
-      });
+      if (dateText.includes(formattedDate)) {
+        correctRow = row;
+      }
     });
 
-    // Extract day name + date from first row
-    const firstDayCell = $$('#routineTable tbody tr td.week-day').first();
-    const dayName = firstDayCell.contents().first().text().trim() || "";
-    const dayDate = firstDayCell.find("br").next().text().trim() || "";
+    if (!correctRow) {
+      return res.json({
+        success: true,
+        selected: formattedDate,
+        dayName: "",
+        dayDate: formattedDate,
+        periods: []
+      });
+    }
 
+    // Extract day name + date
+    const dayCell = $$(correctRow).find("td.week-day");
+    const fullText = dayCell.text().trim().split("\n").map(t => t.trim()).filter(t => t);
+
+    const dayName = fullText[0] || "";
+    const dayDate = fullText[1] || formattedDate;
+
+    // Extract period cells (skip first cell)
+    const tds = $$(correctRow).find("td").slice(1);
+
+    tds.each((index, cell) => {
+      let $cell = $$(cell);
+
+      let subject = $cell.find(".class-subject").text().trim();
+      let teacher = $cell.find(".class-teacher").text().trim();
+      let room = $cell.find(".bulding-room").text().trim();
+
+      let attendance = "";
+      if ($cell.find(".attendance_status_present").length) attendance = "P";
+      if ($cell.find(".attendance_status_absent").length) attendance = "A";
+
+      let colspan = parseInt($cell.attr("colspan")) || 1;
+
+      if (subject || teacher || room) {
+        periods.push({
+          subject,
+          teacher,
+          room,
+          attendance,
+          periodIndex: index + 1,
+          colspan
+        });
+      }
+    });
+
+    // FINAL JSON RETURN
     return res.json({
       success: true,
       selected: formattedDate,
@@ -230,6 +250,7 @@ app.post("/routine", async (req, res) => {
     return res.status(500).json({ error: "Routine fetch failed" });
   }
 });
+
 
 
 const PORT = process.env.PORT || 5000;
