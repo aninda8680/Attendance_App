@@ -125,55 +125,84 @@ app.post("/routine", async (req, res) => {
     const jar = new CookieJar();
     const client = wrapper(axios.create({ jar, withCredentials: true }));
 
-    // 1️⃣ Load login page → CSRF
-    const loginPage = await client.get(`${BASE_URL}/student/login`);
+    // 1) Login page + CSRF
+    const loginPage = await client.get(`${BASE_URL}/student/login`, {
+      headers: {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/122 Safari/537.36",
+      },
+    });
+
     const $ = cheerio.load(loginPage.data);
     const csrfToken = $('input[name="_token"]').val();
     if (!csrfToken) return res.status(500).json({ error: "CSRF missing" });
 
-    // 2️⃣ POST login
+    // 2) Login POST (with same headers as attendance)
     const formData = new URLSearchParams({
       _token: csrfToken,
       registration_no: username,
       password,
-      login: "login"
+      login: "login",
     });
 
     const loginResponse = await client.post(
       `${BASE_URL}/student/login`,
       formData.toString(),
       {
+        headers: {
+          "Content-Type": "application/x-www-form-urlencoded",
+          "Referer": `${BASE_URL}/student/login`,
+          "Origin": BASE_URL,
+          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/122 Safari/537.36",
+        },
         maxRedirects: 0,
-        validateStatus: s => s < 500
+        validateStatus: s => s < 500,
       }
     );
 
-    if (loginResponse.status !== 302)
+    if (loginResponse.status !== 302) {
       return res.status(401).json({ error: "Invalid username or password" });
+    }
 
-    // 3️⃣ Load routine page
-    const routinePage = await client.get(`${BASE_URL}/student/routine`, {
-  headers: {
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/122 Safari/537.36",
-    "Referer": `${BASE_URL}/student/dashboard`,
-    "Origin": BASE_URL,
-    "Accept": "text/html,application/xhtml+xml",
-  }
-});
+    // 3) Convert date
+    const formatted = date.split("-").reverse().join("-"); // dd-mm-yyyy
+    const [dd, mm, yyyy] = formatted.split("-");
 
-    const $$ = cheerio.load(routinePage.data);
+    // Calculate week number
+    const week = Math.floor((Number(dd) - 1) / 7) + 1;
 
-    // ⚠ Convert yyyy-mm-dd → dd-mm-yyyy (matches website)
-    const formatted = date.split("-").reverse().join("-");
+    // 4) Load routine FORM PAGE to get new CSRF token
+    const routineFormPage = await client.get(`${BASE_URL}/student/routine`);
+    const $$ = cheerio.load(routineFormPage.data);
+    const routineToken = $$('input[name="_token"]').val();
 
-    // 4️⃣ Find the row with matching date inside <td class="week-day">
+    // 5) Submit routine search request
+    const routinePage = await client.post(
+      `${BASE_URL}/student/routine`,
+      new URLSearchParams({
+        _token: routineToken,
+        month: mm,
+        week: week.toString(),
+        date: formatted,
+        search: "search",
+      }),
+      {
+        headers: {
+          "Content-Type": "application/x-www-form-urlencoded",
+          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/122 Safari/537.36",
+          "Referer": `${BASE_URL}/student/routine`,
+          "Origin": BASE_URL,
+        },
+      }
+    );
+
+    const $$$ = cheerio.load(routinePage.data);
+
+    // 6) Find matching day row
     let targetRow = null;
 
-    $$('.table.table-bordered tbody tr').each((_, row) => {
-      const text = $$(row).find('.week-day').text();
-      if (text.includes(formatted)) {
-        targetRow = row;
-      }
+    $$$('.table.table-bordered tbody tr').each((_, row) => {
+      const text = $$$(row).find('.week-day').text();
+      if (text.includes(formatted)) targetRow = row;
     });
 
     if (!targetRow) {
@@ -181,29 +210,28 @@ app.post("/routine", async (req, res) => {
         selected: date,
         dayName: new Date(date).toLocaleDateString("en-US", { weekday: "long" }),
         dayDate: date,
-        periods: []
+        periods: [],
       });
     }
 
     const periods = [];
     let periodIndex = 1;
 
-    // 5️⃣ Extract cells for that day (skip first <td.week-day>)
-    const cells = $$(targetRow).find("td.routine-content");
+    // 7) Extract period data
+    const cells = $$$(targetRow).find("td.routine-content");
 
     cells.each((_, cell) => {
-      const colspanAttr = $$(cell).attr("colspan");
+      const colspanAttr = $$$(cell).attr("colspan");
       const colspan = colspanAttr ? parseInt(colspanAttr) : 1;
 
-      const subject = $$(cell).find(".class-subject").text().trim() || "-";
-      const teacher = $$(cell).find(".class-teacher").text().trim() || "-";
-      const room = $$(cell).find(".bulding-room").text().trim() || "-";
+      const subject = $$$(cell).find(".class-subject").text().trim() || "-";
+      const teacher = $$$(cell).find(".class-teacher").text().trim() || "-";
+      const room = $$$(cell).find(".bulding-room").text().trim() || "-";
 
       let attendance = "-";
-      if ($$(cell).find(".attendance_status_present").length) attendance = "P";
-      if ($$(cell).find(".attendance_status_absent").length) attendance = "A";
+if ($$$(cell).find(".attendance_status_present").length) attendance = "P";
+if ($$$(cell).find(".attendance_status_absent").length) attendance = "A";
 
-      // Push multiple periods if colspan > 1
       for (let i = 0; i < colspan; i++) {
         periods.push({
           subject,
@@ -211,25 +239,24 @@ app.post("/routine", async (req, res) => {
           room,
           attendance,
           periodIndex,
-          colspan
+          colspan,
         });
         periodIndex++;
       }
     });
 
-    // 6️⃣ Respond exactly in Flutter model structure
     return res.json({
       selected: date,
       dayName: new Date(date).toLocaleDateString("en-US", { weekday: "long" }),
       dayDate: date,
-      periods
+      periods,
     });
-
   } catch (err) {
     console.error("❌ Routine Error:", err);
-    return res.status(500).json({ error: "Something went wrong fetching routine" });
+    return res.status(500).json({ error: "Failed routine fetch" });
   }
 });
+
 
 
 
