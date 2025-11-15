@@ -114,6 +114,21 @@ app.post("/attendance", async (req, res) => {
   }
 });
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 app.post("/routine", async (req, res) => {
   const { username, password, date } = req.body;
 
@@ -125,10 +140,11 @@ app.post("/routine", async (req, res) => {
     const jar = new CookieJar();
     const client = wrapper(axios.create({ jar, withCredentials: true }));
 
-    // 1) Login page + CSRF
+    // 1) LOGIN PAGE → CSRF
     const loginPage = await client.get(`${BASE_URL}/student/login`, {
       headers: {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/122 Safari/537.36",
+        "User-Agent":
+          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/122 Safari/537.36",
       },
     });
 
@@ -136,7 +152,7 @@ app.post("/routine", async (req, res) => {
     const csrfToken = $('input[name="_token"]').val();
     if (!csrfToken) return res.status(500).json({ error: "CSRF missing" });
 
-    // 2) Login POST
+    // 2) LOGIN POST
     const formData = new URLSearchParams({
       _token: csrfToken,
       registration_no: username,
@@ -152,10 +168,11 @@ app.post("/routine", async (req, res) => {
           "Content-Type": "application/x-www-form-urlencoded",
           "Referer": `${BASE_URL}/student/login`,
           "Origin": BASE_URL,
-          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/122 Safari/537.36",
+          "User-Agent":
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/122 Safari/537.36",
         },
         maxRedirects: 0,
-        validateStatus: s => s < 500,
+        validateStatus: (s) => s < 500,
       }
     );
 
@@ -163,84 +180,96 @@ app.post("/routine", async (req, res) => {
       return res.status(401).json({ error: "Invalid username or password" });
     }
 
-    // 3) Convert date yyyy-mm-dd -> dd-mm-yyyy
+    // Convert yyyy-mm-dd → dd-mm-yyyy
     const formatted = date.split("-").reverse().join("-");
     const [dd, mm] = formatted.split("-");
 
-    // Simple week calculation
-    const week = Math.floor((Number(dd) - 1) / 7) + 1;
-
-    // 4) Load routine form page (new CSRF)
+    // 3) LOAD routine form page → get new CSRF token
     const routineFormPage = await client.get(`${BASE_URL}/student/routine`, {
       headers: {
         "User-Agent": "Mozilla/5.0",
         "Referer": `${BASE_URL}/student/dashboard`,
-      }
+      },
     });
 
     const $$ = cheerio.load(routineFormPage.data);
     const routineToken = $$('input[name="_token"]').val();
 
-    // 5) Submit routine POST
-    const routinePage = await client.post(
-      `${BASE_URL}/student/routine`,
-      new URLSearchParams({
-        _token: routineToken,
-        month: mm,
-        week: week.toString(),
-        date: formatted,
-        search: "search",
-      }),
-      {
-        headers: {
-          "Content-Type": "application/x-www-form-urlencoded",
-          "User-Agent": "Mozilla/5.0",
-          "Referer": `${BASE_URL}/student/routine`,
-        },
-      }
-    );
+    // ---- AUTO-DETECT WEEK ----
+    const found = {
+      row: null,
+      week: null,
+    };
 
-    const $$$ = cheerio.load(routinePage.data);
+    // Try week 1 → 5
+    for (let w = 1; w <= 5; w++) {
+      const resp = await client.post(
+        `${BASE_URL}/student/routine`,
+        new URLSearchParams({
+          _token: routineToken,
+          month: mm,
+          week: w.toString(),
+          date: formatted,
+          search: "search",
+        }),
+        {
+          headers: {
+            "Content-Type": "application/x-www-form-urlencoded",
+            "User-Agent": "Mozilla/5.0",
+            "Referer": `${BASE_URL}/student/routine`,
+          },
+        }
+      );
 
-    // 6) Find row by exact date using regex
-    let targetRow = null;
+      const $$$ = cheerio.load(resp.data);
 
-    $$$('.table.table-bordered tbody tr').each((_, row) => {
-      const html = $$$(row).find(".week-day").html() || "";
-      const match = html.match(/\b\d{2}-\d{2}-\d{4}\b/);
-      if (!match) return;
+      // Find row containing EXACT date
+      $$$(".table.table-bordered tbody tr").each((_, row) => {
+        const html = $$$(row).find(".week-day").html() || "";
+        const match = html.match(/\b\d{2}-\d{2}-\d{4}\b/);
 
-      if (match[0].trim() === formatted) {
-        targetRow = row;
-      }
-    });
+        if (match && match[0] === formatted) {
+          found.row = row;
+          found.week = w;
+        }
+      });
 
-    // If no row, return empty
-    if (!targetRow) {
+      if (found.row) break;
+    }
+
+    // If no routine found at all
+    if (!found.row) {
       return res.json({
         selected: date,
-        dayName: new Date(date).toLocaleDateString("en-US", { weekday: "long" }),
+        dayName: new Date(date).toLocaleDateString("en-US", {
+          weekday: "long",
+        }),
         dayDate: date,
-        periods: []
+        periods: [],
       });
     }
 
-    // 7) Extract periods
+    // ---- PARSE PERIODS ----
     const periods = [];
     let periodIndex = 1;
 
-    const cells = $$$(targetRow).find("td.routine-content");
+    const $$$ = cheerio.load(routineFormPage.data); // reload parser
+    const row = found.row;
+    const rowParser = cheerio.load(cheerio.html(row));
+
+    const cells = rowParser("td.routine-content");
 
     cells.each((_, cell) => {
-      const colspan = parseInt($$$(cell).attr("colspan") || "1");
+      const c = rowParser(cell);
 
-      const subject = $$$(cell).find(".class-subject").text().trim() || "-";
-      const teacher = $$$(cell).find(".class-teacher").text().trim() || "-";
-      const room = $$$(cell).find(".bulding-room").text().trim() || "-";
+      const colspan = parseInt(c.attr("colspan") || "1");
+      const subject = c.find(".class-subject").text().trim() || "-";
+      const teacher = c.find(".class-teacher").text().trim() || "-";
+      const room = c.find(".bulding-room").text().trim() || "-";
 
       let attendance = "-";
-      if ($$$(cell).find(".attendance_status_present").length) attendance = "P";
-      if ($$$(cell).find(".attendance_status_absent").length) attendance = "A";
+      if (c.find(".attendance_status_present").length) attendance = "P";
+      if (c.find(".attendance_status_absent").length) attendance = "A";
 
       for (let i = 0; i < colspan; i++) {
         periods.push({
@@ -255,18 +284,22 @@ app.post("/routine", async (req, res) => {
       }
     });
 
+    // ---- RETURN FINAL OUTPUT ----
     return res.json({
       selected: date,
-      dayName: new Date(date).toLocaleDateString("en-US", { weekday: "long" }),
+      dayName: new Date(date).toLocaleDateString("en-US", {
+        weekday: "long",
+      }),
       dayDate: date,
       periods,
     });
-
   } catch (err) {
     console.error("❌ Routine Error:", err);
     return res.status(500).json({ error: "Failed routine fetch" });
   }
 });
+
+
 
 
 
