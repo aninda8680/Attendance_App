@@ -171,7 +171,14 @@ app.post("/routine", async (req, res) => {
     const week = Math.floor((Number(dd) - 1) / 7) + 1;
 
     // 4) Load routine FORM PAGE to get new CSRF token
-    const routineFormPage = await client.get(`${BASE_URL}/student/routine`);
+const routineFormPage = await client.get(`${BASE_URL}/student/routine`, {
+  headers: {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/122 Safari/537.36",
+    "Referer": `${BASE_URL}/student/dashboard`,
+    "Origin": BASE_URL,
+    "Accept": "text/html,application/xhtml+xml",
+  }
+});
     const $$ = cheerio.load(routineFormPage.data);
     const routineToken = $$('input[name="_token"]').val();
 
@@ -231,6 +238,7 @@ app.post("/routine", async (req, res) => {
       let attendance = "-";
 if ($$$(cell).find(".attendance_status_present").length) attendance = "P";
 if ($$$(cell).find(".attendance_status_absent").length) attendance = "A";
+
 
       for (let i = 0; i < colspan; i++) {
         periods.push({
