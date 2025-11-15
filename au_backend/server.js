@@ -141,67 +141,42 @@ app.post("/routine", async (req, res) => {
     const client = wrapper(axios.create({ jar, withCredentials: true }));
 
     // 1) LOGIN PAGE → CSRF
-    const loginPage = await client.get(`${BASE_URL}/student/login`, {
-      headers: {
-        "User-Agent":
-          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/122 Safari/537.36",
-      },
-    });
-
+    const loginPage = await client.get(`${BASE_URL}/student/login`);
     const $ = cheerio.load(loginPage.data);
     const csrfToken = $('input[name="_token"]').val();
     if (!csrfToken) return res.status(500).json({ error: "CSRF missing" });
 
     // 2) LOGIN POST
-    const formData = new URLSearchParams({
-      _token: csrfToken,
-      registration_no: username,
-      password,
-      login: "login",
-    });
-
     const loginResponse = await client.post(
       `${BASE_URL}/student/login`,
-      formData.toString(),
-      {
-        headers: {
-          "Content-Type": "application/x-www-form-urlencoded",
-          "Referer": `${BASE_URL}/student/login`,
-          "Origin": BASE_URL,
-          "User-Agent":
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/122 Safari/537.36",
-        },
-        maxRedirects: 0,
-        validateStatus: (s) => s < 500,
-      }
+      new URLSearchParams({
+        _token: csrfToken,
+        registration_no: username,
+        password,
+        login: "login",
+      }).toString(),
+      { maxRedirects: 0, validateStatus: (s) => s < 500 }
     );
 
     if (loginResponse.status !== 302) {
       return res.status(401).json({ error: "Invalid username or password" });
     }
 
-    // Convert yyyy-mm-dd → dd-mm-yyyy
+    // 3) Convert date
     const formatted = date.split("-").reverse().join("-");
     const [dd, mm] = formatted.split("-");
 
-    // 3) LOAD routine form page → get new CSRF token
-    const routineFormPage = await client.get(`${BASE_URL}/student/routine`, {
-      headers: {
-        "User-Agent": "Mozilla/5.0",
-        "Referer": `${BASE_URL}/student/dashboard`,
-      },
-    });
-
+    // 4) LOAD routine FORM PAGE → new CSRF token
+    const routineFormPage = await client.get(`${BASE_URL}/student/routine`);
     const $$ = cheerio.load(routineFormPage.data);
     const routineToken = $$('input[name="_token"]').val();
 
-    // ---- AUTO-DETECT WEEK ----
+    // -------- AUTO-DETECT WEEK --------
     const found = {
-      row: null,
-      week: null,
+      rowHtml: null,
+      pageHtml: null,
     };
 
-    // Try week 1 → 5
     for (let w = 1; w <= 5; w++) {
       const resp = await client.post(
         `${BASE_URL}/student/routine`,
@@ -211,55 +186,42 @@ app.post("/routine", async (req, res) => {
           week: w.toString(),
           date: formatted,
           search: "search",
-        }),
-        {
-          headers: {
-            "Content-Type": "application/x-www-form-urlencoded",
-            "User-Agent": "Mozilla/5.0",
-            "Referer": `${BASE_URL}/student/routine`,
-          },
-        }
+        }).toString()
       );
 
       const $$$ = cheerio.load(resp.data);
 
-      // Find row containing EXACT date
       $$$(".table.table-bordered tbody tr").each((_, row) => {
-        const html = $$$(row).find(".week-day").html() || "";
-        const match = html.match(/\b\d{2}-\d{2}-\d{4}\b/);
+        const weekText = $$$(".week-day", row).text().replace(/\s+/g, " ").trim();
+        const match = weekText.match(/\d{2}-\d{2}-\d{4}/);
 
         if (match && match[0] === formatted) {
-          found.row = row;
-          found.week = w;
+          found.rowHtml = $$$.html(row);
+          found.pageHtml = resp.data;
         }
       });
 
-      if (found.row) break;
+      if (found.rowHtml) break;
     }
 
-    // If no routine found at all
-    if (!found.row) {
+    // No routine for this date
+    if (!found.rowHtml) {
       return res.json({
         selected: date,
-        dayName: new Date(date).toLocaleDateString("en-US", {
-          weekday: "long",
-        }),
+        dayName: new Date(date).toLocaleDateString("en-US", { weekday: "long" }),
         dayDate: date,
         periods: [],
       });
     }
 
-    // ---- PARSE PERIODS ----
+    // -------- PARSE PERIODS --------
+    const pageParser = cheerio.load(found.pageHtml);
+    const rowParser = cheerio.load(found.rowHtml);
+
     const periods = [];
     let periodIndex = 1;
 
-    const $$$ = cheerio.load(routineFormPage.data); // reload parser
-    const row = found.row;
-    const rowParser = cheerio.load(cheerio.html(row));
-
-    const cells = rowParser("td.routine-content");
-
-    cells.each((_, cell) => {
+    rowParser("td.routine-content").each((_, cell) => {
       const c = rowParser(cell);
 
       const colspan = parseInt(c.attr("colspan") || "1");
@@ -284,15 +246,14 @@ app.post("/routine", async (req, res) => {
       }
     });
 
-    // ---- RETURN FINAL OUTPUT ----
+    // -------- RESPONSE --------
     return res.json({
       selected: date,
-      dayName: new Date(date).toLocaleDateString("en-US", {
-        weekday: "long",
-      }),
+      dayName: new Date(date).toLocaleDateString("en-US", { weekday: "long" }),
       dayDate: date,
       periods,
     });
+
   } catch (err) {
     console.error("❌ Routine Error:", err);
     return res.status(500).json({ error: "Failed routine fetch" });
