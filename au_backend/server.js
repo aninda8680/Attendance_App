@@ -181,13 +181,15 @@ app.post("/routine", async (req, res) => {
 
     // Find correct row based on date
     let correctRow = null;
+    const altDate1 = `${dd}/${mm}/${yyyy}`;
+const altDate2 = `${dd}-${mm}-${yyyy}`;
 
     $$('.routine1 table tbody tr').each((i, row) => {
       const cell = $$(row).find("td.week-day");
       const dateText = cell.text().trim();
 
-      if (dateText.includes(formattedDate)) {
-        correctRow = row;
+      if (dateText.includes(altDate1) || dateText.includes(altDate2)) {
+    correctRow = row;
       }
     });
 
