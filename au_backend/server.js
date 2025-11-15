@@ -152,7 +152,15 @@ app.post("/routine", async (req, res) => {
       return res.status(401).json({ error: "Invalid username or password" });
 
     // 3️⃣ Load routine page
-    const routinePage = await client.get(`${BASE_URL}/student/routine`);
+    const routinePage = await client.get(`${BASE_URL}/student/routine`, {
+  headers: {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/122 Safari/537.36",
+    "Referer": `${BASE_URL}/student/dashboard`,
+    "Origin": BASE_URL,
+    "Accept": "text/html,application/xhtml+xml",
+  }
+});
+
     const $$ = cheerio.load(routinePage.data);
 
     // ⚠ Convert yyyy-mm-dd → dd-mm-yyyy (matches website)
