@@ -125,94 +125,104 @@ app.post("/routine", async (req, res) => {
     const jar = new CookieJar();
     const client = wrapper(axios.create({ jar, withCredentials: true }));
 
-    // STEP 1 → GET login page
+    // 1️⃣ Load login page → CSRF
     const loginPage = await client.get(`${BASE_URL}/student/login`);
     const $ = cheerio.load(loginPage.data);
     const csrfToken = $('input[name="_token"]').val();
+    if (!csrfToken) return res.status(500).json({ error: "CSRF missing" });
 
-    if (!csrfToken) {
-      return res.status(500).json({ error: "CSRF token missing" });
-    }
-
-    // STEP 2 → POST login
+    // 2️⃣ POST login
     const formData = new URLSearchParams({
       _token: csrfToken,
       registration_no: username,
-      password: password,
-      login: "login",
+      password,
+      login: "login"
     });
 
     const loginResponse = await client.post(
       `${BASE_URL}/student/login`,
       formData.toString(),
       {
-        headers: {
-          "Content-Type": "application/x-www-form-urlencoded",
-        },
         maxRedirects: 0,
-        validateStatus: (s) => s < 500,
+        validateStatus: s => s < 500
       }
     );
 
-    if (loginResponse.status !== 302) {
+    if (loginResponse.status !== 302)
       return res.status(401).json({ error: "Invalid username or password" });
-    }
 
-    // STEP 3 → Fetch Routine Page
+    // 3️⃣ Load routine page
     const routinePage = await client.get(`${BASE_URL}/student/routine`);
     const $$ = cheerio.load(routinePage.data);
 
-    // Detect selected date info
-    const selected = date;
-    const dayDate = date;
-    const dayName = new Date(date).toLocaleDateString("en-US", {
-      weekday: "long",
+    // ⚠ Convert yyyy-mm-dd → dd-mm-yyyy (matches website)
+    const formatted = date.split("-").reverse().join("-");
+
+    // 4️⃣ Find the row with matching date inside <td class="week-day">
+    let targetRow = null;
+
+    $$('.table.table-bordered tbody tr').each((_, row) => {
+      const text = $$(row).find('.week-day').text();
+      if (text.includes(formatted)) {
+        targetRow = row;
+      }
     });
 
+    if (!targetRow) {
+      return res.json({
+        selected: date,
+        dayName: new Date(date).toLocaleDateString("en-US", { weekday: "long" }),
+        dayDate: date,
+        periods: []
+      });
+    }
+
     const periods = [];
+    let periodIndex = 1;
 
-    let periodCounter = 1;
+    // 5️⃣ Extract cells for that day (skip first <td.week-day>)
+    const cells = $$(targetRow).find("td.routine-content");
 
-    // Parse table rows (modify selector if needed)
-    $$('#myTable tbody tr').each((i, row) => {
-      const cols = $$(row).find("td");
-
-      if (cols.length === 0) return;
-
-      // Detect colspan (if any merged periods)
-      const colspanAttr = $$(cols[0]).attr("colspan");
+    cells.each((_, cell) => {
+      const colspanAttr = $$(cell).attr("colspan");
       const colspan = colspanAttr ? parseInt(colspanAttr) : 1;
 
-      const subject = $$(cols[0]).text().trim();
-      const teacher = $$(cols[1]).text().trim();
-      const room = $$(cols[2]).text().trim();
-      const attendance = $$(cols[3]).text().trim() || "-";
+      const subject = $$(cell).find(".class-subject").text().trim() || "-";
+      const teacher = $$(cell).find(".class-teacher").text().trim() || "-";
+      const room = $$(cell).find(".bulding-room").text().trim() || "-";
 
-      for (let c = 0; c < colspan; c++) {
+      let attendance = "-";
+      if ($$(cell).find(".attendance_status_present").length) attendance = "P";
+      if ($$(cell).find(".attendance_status_absent").length) attendance = "A";
+
+      // Push multiple periods if colspan > 1
+      for (let i = 0; i < colspan; i++) {
         periods.push({
           subject,
           teacher,
           room,
           attendance,
-          periodIndex: periodCounter,
-          colspan,
+          periodIndex,
+          colspan
         });
-        periodCounter++;
+        periodIndex++;
       }
     });
 
+    // 6️⃣ Respond exactly in Flutter model structure
     return res.json({
-      selected,
-      dayName,
-      dayDate,
-      periods,
+      selected: date,
+      dayName: new Date(date).toLocaleDateString("en-US", { weekday: "long" }),
+      dayDate: date,
+      periods
     });
 
   } catch (err) {
     console.error("❌ Routine Error:", err);
-    res.status(500).json({ error: "Something went wrong while fetching routine" });
+    return res.status(500).json({ error: "Something went wrong fetching routine" });
   }
 });
+
 
 
 const PORT = process.env.PORT || 5000;
