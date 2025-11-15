@@ -114,157 +114,102 @@ app.post("/attendance", async (req, res) => {
   }
 });
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 app.post("/routine", async (req, res) => {
-  const { username, password, date } = req.body;
-
-  if (!username || !password || !date) {
-    return res.status(400).json({ error: "username, password, date required" });
+  const { username, password } = req.body;
+  if (!username || !password) {
+    return res.status(400).json({ error: "Username and password required" });
   }
 
   try {
+    // 🍪 Cookie jar
     const jar = new CookieJar();
     const client = wrapper(axios.create({ jar, withCredentials: true }));
 
-    // 1) LOGIN PAGE → CSRF
-    const loginPage = await client.get(`${BASE_URL}/student/login`);
+    // STEP 1️⃣: GET login page → extract CSRF
+    const loginPage = await client.get(`${BASE_URL}/student/login`, {
+      headers: {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/122 Safari/537.36"
+      }
+    });
+
     const $ = cheerio.load(loginPage.data);
     const csrfToken = $('input[name="_token"]').val();
-    if (!csrfToken) return res.status(500).json({ error: "CSRF missing" });
 
-    // 2) LOGIN POST
+    if (!csrfToken) {
+      return res.status(500).json({ error: "CSRF token not found" });
+    }
+
+    // STEP 2️⃣: Login
+    const formData = new URLSearchParams({
+      _token: csrfToken,
+      registration_no: username,
+      password: password,
+      login: "login",
+    });
+
     const loginResponse = await client.post(
       `${BASE_URL}/student/login`,
-      new URLSearchParams({
-        _token: csrfToken,
-        registration_no: username,
-        password,
-        login: "login",
-      }).toString(),
-      { maxRedirects: 0, validateStatus: (s) => s < 500 }
+      formData.toString(),
+      {
+        headers: {
+          "Content-Type": "application/x-www-form-urlencoded",
+          "Referer": `${BASE_URL}/student/login`,
+          "Origin": BASE_URL,
+          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/122 Safari/537.36"
+        },
+        maxRedirects: 0,
+        validateStatus: (s) => s < 500,
+      }
     );
 
     if (loginResponse.status !== 302) {
       return res.status(401).json({ error: "Invalid username or password" });
     }
 
-    // 3) Convert date
-    const formatted = date.split("-").reverse().join("-");
-    const [dd, mm] = formatted.split("-");
-
-    // 4) LOAD routine FORM PAGE → new CSRF token
-    const routineFormPage = await client.get(`${BASE_URL}/student/routine`);
-    const $$ = cheerio.load(routineFormPage.data);
-    const routineToken = $$('input[name="_token"]').val();
-
-    // -------- AUTO-DETECT WEEK --------
-    const found = {
-      rowHtml: null,
-      pageHtml: null,
-    };
-
-    for (let w = 1; w <= 5; w++) {
-      const resp = await client.post(
-        `${BASE_URL}/student/routine`,
-        new URLSearchParams({
-          _token: routineToken,
-          month: mm,
-          week: w.toString(),
-          date: formatted,
-          search: "search",
-        }).toString()
-      );
-
-      const $$$ = cheerio.load(resp.data);
-
-      $$$(".table.table-bordered tbody tr").each((_, row) => {
-        const weekText = $$$(".week-day", row).text().replace(/\s+/g, " ").trim();
-        const match = weekText.match(/\d{2}-\d{2}-\d{4}/);
-
-        if (match && match[0] === formatted) {
-          found.rowHtml = $$$.html(row);
-          found.pageHtml = resp.data;
-        }
-      });
-
-      if (found.rowHtml) break;
-    }
-
-    // No routine for this date
-    if (!found.rowHtml) {
-      return res.json({
-        selected: date,
-        dayName: new Date(date).toLocaleDateString("en-US", { weekday: "long" }),
-        dayDate: date,
-        periods: [],
-      });
-    }
-
-    // -------- PARSE PERIODS --------
-    const pageParser = cheerio.load(found.pageHtml);
-    const rowParser = cheerio.load(found.rowHtml);
-
-    const periods = [];
-    let periodIndex = 1;
-
-    rowParser("td.routine-content").each((_, cell) => {
-      const c = rowParser(cell);
-
-      const colspan = parseInt(c.attr("colspan") || "1");
-      const subject = c.find(".class-subject").text().trim() || "-";
-      const teacher = c.find(".class-teacher").text().trim() || "-";
-      const room = c.find(".bulding-room").text().trim() || "-";
-
-      let attendance = "-";
-      if (c.find(".attendance_status_present").length) attendance = "P";
-      if (c.find(".attendance_status_absent").length) attendance = "A";
-
-      for (let i = 0; i < colspan; i++) {
-        periods.push({
-          subject,
-          teacher,
-          room,
-          attendance,
-          periodIndex,
-          colspan,
-        });
-        periodIndex++;
+    // STEP 3️⃣: Fetch Routine Page
+    const routinePage = await client.get(`${BASE_URL}/student/routine`, {
+      headers: {
+        "User-Agent": "Mozilla/5.0",
+        "Referer": `${BASE_URL}/student/dashboard`,
       }
     });
 
-    // -------- RESPONSE --------
+    const $$ = cheerio.load(routinePage.data);
+    const routineItems = [];
+
+    // NOTE: Actual table IDs may differ. Adjust after viewing HTML.
+    $$('#myTable tbody tr').each((i, row) => {
+      const cols = $$(row).find("td");
+      if (cols.length >= 5) {
+        routineItems.push({
+          period: $$(cols[0]).text().trim(),
+          subject: $$(cols[1]).text().trim(),
+          teacher: $$(cols[2]).text().trim(),
+          room: $$(cols[3]).text().trim(),
+          time: $$(cols[4]).text().trim(),
+        });
+      }
+    });
+
+    if (routineItems.length === 0) {
+      return res.status(200).json({
+        success: true,
+        routine: [],
+        message: "No routine data found. Table selector may need updating.",
+      });
+    }
+
     return res.json({
-      selected: date,
-      dayName: new Date(date).toLocaleDateString("en-US", { weekday: "long" }),
-      dayDate: date,
-      periods,
+      success: true,
+      routine: routineItems,
+      total_periods: routineItems.length,
     });
 
   } catch (err) {
-    console.error("❌ Routine Error:", err);
-    return res.status(500).json({ error: "Failed routine fetch" });
+    console.error("❌ Error fetching routine:", err);
+    res.status(500).json({ error: "Something went wrong" });
   }
 });
-
-
-
-
-
-
 
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => console.log("✅ Server running on port", PORT));
