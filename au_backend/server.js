@@ -159,7 +159,7 @@ app.post("/routine", async (req, res) => {
     const jar = new CookieJar();
     const client = wrapper(axios.create({ jar, withCredentials: true }));
 
-    // STEP 1: Login (same as attendance)
+    // STEP 1: Login
     const loginPage = await client.get(`${BASE_URL}/student/login`);
     const $login = cheerio.load(loginPage.data);
     const csrfToken = $login('input[name="_token"]').val();
@@ -168,7 +168,7 @@ app.post("/routine", async (req, res) => {
       _token: csrfToken,
       registration_no: username,
       password: password,
-      login: "login"
+      login: "login",
     });
 
     const loginResponse = await client.post(
@@ -182,64 +182,84 @@ app.post("/routine", async (req, res) => {
     }
 
     // STEP 2: Fetch routine page
-    const routinePage = await client.get(
-      `${BASE_URL}/student/routine?pre=${date}`
-    );
-
+    const routinePage = await client.get(`${BASE_URL}/student/routine?pre=${date}`);
     const $ = cheerio.load(routinePage.data);
 
-    // Extract day & date
-    let dayName = "";
-    let dayDate = "";
+    // STEP 3: Find the correct row matching the date
+    // Example txt inside .week-day:
+    // "Monday\n17-11-2025"
+    const dayRow = $('td.week-day').filter((i, el) => {
+      return $(el).text().includes(date);
+    }).closest("tr");
 
-    const firstRow = $("tbody tr").first().find(".week-day");
-    if (firstRow.length) {
-      const txt = firstRow.text().trim().split("\n");
-      dayName = txt[0].trim();
-      dayDate = txt[1].trim();
+    if (!dayRow.length) {
+      return res.json({
+        success: false,
+        dayName: "",
+        dayDate: date,
+        periods: [],
+        message: "No routine found for selected date",
+      });
     }
 
+    // Extract dayName + dayDate correctly
+    const dayText = dayRow.find("td.week-day").text().trim().split("\n");
+    const dayName = (dayText[0] || "").trim();
+    const dayDate = (dayText[1] || "").trim();
+
+    // STEP 4: Parse periods
     const periods = [];
-let periodCounter = 1;
+    let periodCounter = 1;
 
-$("tbody tr").first().find("td.routine-content").each((i, col) => {
-  const $col = $(col);
+    dayRow.find("td.routine-content").each((i, col) => {
+      const $col = $(col);
 
-  const span = parseInt($col.attr("colspan") || "1"); // detect lab span
+      const span = parseInt($col.attr("colspan") || "1"); // lab spans
+      const subject = $col.find(".class-subject").text().trim();
+      const teacher = $col.find(".class-teacher").text().trim();
+      const room = $col.find(".bulding-room").text().trim();
 
-  const subject = $col.find(".class-subject").text().trim();
-  const teacher = $col.find(".class-teacher").text().trim();
-  const room = $col.find(".bulding-room").text().trim();
+      let attendance = "";
+      if ($col.find(".attendance_status_present").length) attendance = "P";
+      else if ($col.find(".attendance_status_absent").length) attendance = "A";
 
-  let attendance = "";
-  if ($col.find(".attendance_status_present").length) attendance = "P";
-  else if ($col.find(".attendance_status_absent").length) attendance = "A";
-
-  // Generate multiple periods for labs
-  for (let k = 0; k < span; k++) {
-    periods.push({
-      period: periodCounter,
-      subject,
-      teacher,
-      attendance,
-      room
+      // Expand according to colspan
+      for (let s = 0; s < span; s++) {
+        periods.push({
+          period: periodCounter,
+          subject,
+          teacher,
+          attendance,
+          room
+        });
+        periodCounter++;
+      }
     });
-    periodCounter++;
-  }
-});
 
+    // Fill missing periods up to 8
+    while (periods.length < 8) {
+      periods.push({
+        period: periods.length + 1,
+        subject: "",
+        teacher: "",
+        attendance: "",
+        room: ""
+      });
+    }
 
     return res.json({
       success: true,
       dayName,
       dayDate,
-      periods
+      periods,
     });
+
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: "Routine fetch failed" });
   }
 });
+
 
 
 
