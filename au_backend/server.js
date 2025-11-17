@@ -200,26 +200,34 @@ app.post("/routine", async (req, res) => {
     }
 
     const periods = [];
-    $("tbody tr").first().find("td.routine-content").each((i, col) => {
-      const $col = $(col);
+let periodCounter = 1;
 
-      let subject = $col.find(".class-subject").text().trim();
-      let teacher = $col.find(".class-teacher").text().trim();
-      let room = $col.find(".bulding-room").text().trim();
+$("tbody tr").first().find("td.routine-content").each((i, col) => {
+  const $col = $(col);
 
-      let attendance = "";
-      if ($col.find(".attendance_status_present").length) attendance = "P";
-      else if ($col.find(".attendance_status_absent").length) attendance = "A";
-      else attendance = "";
+  const span = parseInt($col.attr("colspan") || "1"); // detect lab span
 
-      periods.push({
-        period: i + 1,
-        subject,
-        teacher,
-        attendance,
-        room
-      });
+  const subject = $col.find(".class-subject").text().trim();
+  const teacher = $col.find(".class-teacher").text().trim();
+  const room = $col.find(".bulding-room").text().trim();
+
+  let attendance = "";
+  if ($col.find(".attendance_status_present").length) attendance = "P";
+  else if ($col.find(".attendance_status_absent").length) attendance = "A";
+
+  // Generate multiple periods for labs
+  for (let k = 0; k < span; k++) {
+    periods.push({
+      period: periodCounter,
+      subject,
+      teacher,
+      attendance,
+      room
     });
+    periodCounter++;
+  }
+});
+
 
     return res.json({
       success: true,
