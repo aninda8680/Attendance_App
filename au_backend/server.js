@@ -9,9 +9,29 @@ app.use(express.json());
 
 const BASE_URL = "https://adamasknowledgecity.ac.in";
 
+
+
+
+
+
+
+
+
+
 app.get("/", (req, res) => {
   res.send("✅ Adamas Attendance API is live. Use POST /attendance");
 });
+
+
+
+
+
+
+
+
+
+
+
 
 app.post("/attendance", async (req, res) => {
   const { username, password } = req.body;
@@ -128,7 +148,6 @@ app.post("/attendance", async (req, res) => {
 
 
 
-
 app.post("/routine", async (req, res) => {
   const { username, password, date } = req.body;
 
@@ -140,125 +159,87 @@ app.post("/routine", async (req, res) => {
     const jar = new CookieJar();
     const client = wrapper(axios.create({ jar, withCredentials: true }));
 
-    // 1) LOGIN PAGE → CSRF
+    // STEP 1: Login (same as attendance)
     const loginPage = await client.get(`${BASE_URL}/student/login`);
-    const $ = cheerio.load(loginPage.data);
-    const csrfToken = $('input[name="_token"]').val();
-    if (!csrfToken) return res.status(500).json({ error: "CSRF missing" });
+    const $login = cheerio.load(loginPage.data);
+    const csrfToken = $login('input[name="_token"]').val();
 
-    // 2) LOGIN POST
+    const formData = new URLSearchParams({
+      _token: csrfToken,
+      registration_no: username,
+      password: password,
+      login: "login"
+    });
+
     const loginResponse = await client.post(
       `${BASE_URL}/student/login`,
-      new URLSearchParams({
-        _token: csrfToken,
-        registration_no: username,
-        password,
-        login: "login",
-      }).toString(),
-      { maxRedirects: 0, validateStatus: (s) => s < 500 }
+      formData.toString(),
+      { maxRedirects: 0, validateStatus: s => s < 500 }
     );
 
     if (loginResponse.status !== 302) {
-      return res.status(401).json({ error: "Invalid username or password" });
+      return res.status(401).json({ error: "Invalid login" });
     }
 
-    // 3) Convert date
-    const formatted = date.split("-").reverse().join("-");
-    const [dd, mm] = formatted.split("-");
+    // STEP 2: Fetch routine page
+    const routinePage = await client.get(
+      `${BASE_URL}/student/routine?pre=${date}`
+    );
 
-    // 4) LOAD routine FORM PAGE → new CSRF token
-    const routineFormPage = await client.get(`${BASE_URL}/student/routine`);
-    const $$ = cheerio.load(routineFormPage.data);
-    const routineToken = $$('input[name="_token"]').val();
+    const $ = cheerio.load(routinePage.data);
 
-    // -------- AUTO-DETECT WEEK --------
-    const found = {
-      rowHtml: null,
-      pageHtml: null,
-    };
+    // Extract day & date
+    let dayName = "";
+    let dayDate = "";
 
-    for (let w = 1; w <= 5; w++) {
-      const resp = await client.post(
-        `${BASE_URL}/student/routine`,
-        new URLSearchParams({
-          _token: routineToken,
-          month: mm,
-          week: w.toString(),
-          date: formatted,
-          search: "search",
-        }).toString()
-      );
-
-      const $$$ = cheerio.load(resp.data);
-
-      $$$(".table.table-bordered tbody tr").each((_, row) => {
-        const weekText = $$$(".week-day", row).text().replace(/\s+/g, " ").trim();
-        const match = weekText.match(/\d{2}-\d{2}-\d{4}/);
-
-        if (match && match[0] === formatted) {
-          found.rowHtml = $$$.html(row);
-          found.pageHtml = resp.data;
-        }
-      });
-
-      if (found.rowHtml) break;
+    const firstRow = $("tbody tr").first().find(".week-day");
+    if (firstRow.length) {
+      const txt = firstRow.text().trim().split("\n");
+      dayName = txt[0].trim();
+      dayDate = txt[1].trim();
     }
-
-    // No routine for this date
-    if (!found.rowHtml) {
-      return res.json({
-        selected: date,
-        dayName: new Date(date).toLocaleDateString("en-US", { weekday: "long" }),
-        dayDate: date,
-        periods: [],
-      });
-    }
-
-    // -------- PARSE PERIODS --------
-    const pageParser = cheerio.load(found.pageHtml);
-    const rowParser = cheerio.load(found.rowHtml);
 
     const periods = [];
-    let periodIndex = 1;
+    $("tbody tr").first().find("td.routine-content").each((i, col) => {
+      const $col = $(col);
 
-    rowParser("td.routine-content").each((_, cell) => {
-      const c = rowParser(cell);
+      let subject = $col.find(".class-subject").text().trim();
+      let teacher = $col.find(".class-teacher").text().trim();
+      let room = $col.find(".bulding-room").text().trim();
 
-      const colspan = parseInt(c.attr("colspan") || "1");
-      const subject = c.find(".class-subject").text().trim() || "-";
-      const teacher = c.find(".class-teacher").text().trim() || "-";
-      const room = c.find(".bulding-room").text().trim() || "-";
+      let attendance = "";
+      if ($col.find(".attendance_status_present").length) attendance = "P";
+      else if ($col.find(".attendance_status_absent").length) attendance = "A";
+      else attendance = "";
 
-      let attendance = "-";
-      if (c.find(".attendance_status_present").length) attendance = "P";
-      if (c.find(".attendance_status_absent").length) attendance = "A";
-
-      for (let i = 0; i < colspan; i++) {
-        periods.push({
-          subject,
-          teacher,
-          room,
-          attendance,
-          periodIndex,
-          colspan,
-        });
-        periodIndex++;
-      }
+      periods.push({
+        period: i + 1,
+        subject,
+        teacher,
+        attendance,
+        room
+      });
     });
 
-    // -------- RESPONSE --------
     return res.json({
-      selected: date,
-      dayName: new Date(date).toLocaleDateString("en-US", { weekday: "long" }),
-      dayDate: date,
-      periods,
+      success: true,
+      dayName,
+      dayDate,
+      periods
     });
-
   } catch (err) {
-    console.error("❌ Routine Error:", err);
-    return res.status(500).json({ error: "Failed routine fetch" });
+    console.error(err);
+    res.status(500).json({ error: "Routine fetch failed" });
   }
 });
+
+
+
+
+
+
+
+
 
 
 
