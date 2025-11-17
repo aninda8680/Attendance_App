@@ -186,13 +186,19 @@ app.post("/routine", async (req, res) => {
     const $ = cheerio.load(routinePage.data);
 
     // STEP 3: Find the correct row matching the date
-    // Example txt inside .week-day:
-    // "Monday\n17-11-2025"
-    const dayRow = $('td.week-day').filter((i, el) => {
-  const cleaned = $(el).text().replace(/\s+/g, ' ').trim();
-  return cleaned.includes(date);
-}).closest("tr");
+    const dayRow = $('td.week-day')
+      .filter((i, el) => {
+        let cleaned = $(el)
+          .text()
+          .replace(/\s+/g, ' ')     // normalize whitespace
+          .replace(/–/g, '-')       // en dash to hyphen
+          .replace(/—/g, '-')       // em dash to hyphen
+          .replace(/\u2011/g, '-')  // non-breaking hyphen
+          .trim();
 
+        return cleaned.includes(date);
+      })
+      .closest("tr");
 
     if (!dayRow.length) {
       return res.json({
@@ -205,10 +211,18 @@ app.post("/routine", async (req, res) => {
     }
 
     // Extract dayName + dayDate
-const raw = dayRow.find("td.week-day").text().replace(/\s+/g, ' ').trim();
-const parts = raw.split(" ");
- const dayName = parts[0] || "";
-const dayDate = parts[1] || date;
+    const raw = dayRow
+      .find("td.week-day")
+      .text()
+      .replace(/\s+/g, ' ')     // normalize whitespace
+      .replace(/–/g, '-')       // en dash to hyphen
+      .replace(/—/g, '-')       // em dash to hyphen
+      .replace(/\u2011/g, '-')  // non-breaking hyphen
+      .trim();
+
+    const parts = raw.split(" ");
+    const dayName = parts[0] || "";
+    const dayDate = parts[1] || date;
 
     // STEP 4: Parse periods
     const periods = [];
@@ -217,7 +231,7 @@ const dayDate = parts[1] || date;
     dayRow.find("td.routine-content").each((i, col) => {
       const $col = $(col);
 
-      const span = parseInt($col.attr("colspan") || "1"); // lab spans
+      const span = parseInt($col.attr("colspan") || "1");
       const subject = $col.find(".class-subject").text().trim();
       const teacher = $col.find(".class-teacher").text().trim();
       const room = $col.find(".bulding-room").text().trim();
@@ -226,7 +240,7 @@ const dayDate = parts[1] || date;
       if ($col.find(".attendance_status_present").length) attendance = "P";
       else if ($col.find(".attendance_status_absent").length) attendance = "A";
 
-      // Expand according to colspan
+      // Add periods including lab spans
       for (let s = 0; s < span; s++) {
         periods.push({
           period: periodCounter,
@@ -262,6 +276,7 @@ const dayDate = parts[1] || date;
     res.status(500).json({ error: "Routine fetch failed" });
   }
 });
+
 
 
 
