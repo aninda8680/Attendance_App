@@ -189,8 +189,10 @@ app.post("/routine", async (req, res) => {
     // Example txt inside .week-day:
     // "Monday\n17-11-2025"
     const dayRow = $('td.week-day').filter((i, el) => {
-      return $(el).text().includes(date);
-    }).closest("tr");
+  const cleaned = $(el).text().replace(/\s+/g, ' ').trim();
+  return cleaned.includes(date);
+}).closest("tr");
+
 
     if (!dayRow.length) {
       return res.json({
@@ -202,10 +204,11 @@ app.post("/routine", async (req, res) => {
       });
     }
 
-    // Extract dayName + dayDate correctly
-    const dayText = dayRow.find("td.week-day").text().trim().split("\n");
-    const dayName = (dayText[0] || "").trim();
-    const dayDate = (dayText[1] || "").trim();
+    // Extract dayName + dayDate
+const raw = dayRow.find("td.week-day").text().replace(/\s+/g, ' ').trim();
+const parts = raw.split(" ");
+ const dayName = parts[0] || "";
+const dayDate = parts[1] || date;
 
     // STEP 4: Parse periods
     const periods = [];
