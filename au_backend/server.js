@@ -185,18 +185,15 @@ app.post("/routine", async (req, res) => {
     const routinePage = await client.get(`${BASE_URL}/student/routine?pre=${date}`);
     const $ = cheerio.load(routinePage.data);
 
-    // STEP 3: Find the correct row matching the date
-    const dayRow = $('td.week-day')
+    // STEP 3: Correct date matching using regex extraction
+    const dayRow = $("td.week-day")
       .filter((i, el) => {
-        let cleaned = $(el)
-          .text()
-          .replace(/\s+/g, ' ')     // normalize whitespace
-          .replace(/–/g, '-')       // en dash to hyphen
-          .replace(/—/g, '-')       // em dash to hyphen
-          .replace(/\u2011/g, '-')  // non-breaking hyphen
-          .trim();
+        const txt = $(el).text();
+        const match = txt.match(/(\d{2}-\d{2}-\d{4})/);
+        if (!match) return false;
 
-        return cleaned.includes(date);
+        const cellDate = match[1].trim();
+        return cellDate === date;
       })
       .closest("tr");
 
@@ -211,18 +208,11 @@ app.post("/routine", async (req, res) => {
     }
 
     // Extract dayName + dayDate
-    const raw = dayRow
-      .find("td.week-day")
-      .text()
-      .replace(/\s+/g, ' ')     // normalize whitespace
-      .replace(/–/g, '-')       // en dash to hyphen
-      .replace(/—/g, '-')       // em dash to hyphen
-      .replace(/\u2011/g, '-')  // non-breaking hyphen
-      .trim();
+    const weekText = dayRow.find("td.week-day").text().trim();
+    const dateMatch = weekText.match(/(\d{2}-\d{2}-\d{4})/);
+    const dayDate = dateMatch ? dateMatch[1] : date;
 
-    const parts = raw.split(" ");
-    const dayName = parts[0] || "";
-    const dayDate = parts[1] || date;
+    const dayName = weekText.split("\n")[0].trim();
 
     // STEP 4: Parse periods
     const periods = [];
@@ -240,7 +230,6 @@ app.post("/routine", async (req, res) => {
       if ($col.find(".attendance_status_present").length) attendance = "P";
       else if ($col.find(".attendance_status_absent").length) attendance = "A";
 
-      // Add periods including lab spans
       for (let s = 0; s < span; s++) {
         periods.push({
           period: periodCounter,
@@ -253,7 +242,7 @@ app.post("/routine", async (req, res) => {
       }
     });
 
-    // Fill missing periods up to 8
+    // Always produce 8 periods
     while (periods.length < 8) {
       periods.push({
         period: periods.length + 1,
