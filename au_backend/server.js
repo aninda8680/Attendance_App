@@ -156,6 +156,10 @@ app.post("/routine", async (req, res) => {
   }
 
   try {
+    console.log("\n==============================");
+    console.log("📅 Requesting routine for:", date);
+    console.log("==============================\n");
+
     const jar = new CookieJar();
     const client = wrapper(axios.create({ jar, withCredentials: true }));
 
@@ -185,19 +189,30 @@ app.post("/routine", async (req, res) => {
     const routinePage = await client.get(`${BASE_URL}/student/routine?pre=${date}`);
     const $ = cheerio.load(routinePage.data);
 
+    console.log("🔍 Checking <td.week-day> rows:");
+    $("td.week-day").each((i, el) => {
+      console.log("   → CELL:", $(el).text().trim());
+    });
+
     // STEP 3: Correct date matching using regex extraction
     const dayRow = $("td.week-day")
       .filter((i, el) => {
         const txt = $(el).text();
+
+        // extract date inside cell
         const match = txt.match(/(\d{2}-\d{2}-\d{4})/);
         if (!match) return false;
 
         const cellDate = match[1].trim();
+        console.log("🔎 Found cell date:", cellDate, "| Matching:", date);
+
         return cellDate === date;
       })
       .closest("tr");
 
     if (!dayRow.length) {
+      console.log("❌ No matching date row found on website.");
+
       return res.json({
         success: false,
         dayName: "",
@@ -206,6 +221,8 @@ app.post("/routine", async (req, res) => {
         message: "No routine found for selected date",
       });
     }
+
+    console.log("✅ Matched row found!");
 
     // Extract dayName + dayDate
     const weekText = dayRow.find("td.week-day").text().trim();
@@ -242,6 +259,8 @@ app.post("/routine", async (req, res) => {
       }
     });
 
+    console.log("📘 Parsed periods:", periods.length);
+
     // Always produce 8 periods
     while (periods.length < 8) {
       periods.push({
@@ -265,6 +284,7 @@ app.post("/routine", async (req, res) => {
     res.status(500).json({ error: "Routine fetch failed" });
   }
 });
+
 
 
 
