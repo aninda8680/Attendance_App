@@ -155,6 +155,17 @@ app.post("/routine", async (req, res) => {
     return res.status(400).json({ error: "username, password, date required" });
   }
 
+  // helper: normalize date strings to dd-MM-yyyy (always two digits)
+  function normalizeDateString(s) {
+    if (!s || typeof s !== "string") return s;
+    const m = s.match(/(\d{1,2})-(\d{1,2})-(\d{4})/);
+    if (!m) return s;
+    const d = String(m[1]).padStart(2, "0");
+    const mo = String(m[2]).padStart(2, "0");
+    const y = m[3];
+    return `${d}-${mo}-${y}`;
+  }
+
   try {
     console.log("\n==============================");
     console.log("📅 Requesting routine for:", date);
@@ -163,7 +174,7 @@ app.post("/routine", async (req, res) => {
     const jar = new CookieJar();
     const client = wrapper(axios.create({ jar, withCredentials: true }));
 
-    // STEP 1: Login
+    // STEP 1: Login (get CSRF)
     const loginPage = await client.get(`${BASE_URL}/student/login`);
     const $login = cheerio.load(loginPage.data);
     const csrfToken = $login('input[name="_token"]').val();
@@ -182,6 +193,7 @@ app.post("/routine", async (req, res) => {
     );
 
     if (loginResponse.status !== 302) {
+      console.log("❌ Login failed (status:", loginResponse.status, ")");
       return res.status(401).json({ error: "Invalid login" });
     }
 
@@ -189,46 +201,62 @@ app.post("/routine", async (req, res) => {
     const routinePage = await client.get(`${BASE_URL}/student/routine?pre=${date}`);
     const $ = cheerio.load(routinePage.data);
 
+    // collect available dates on the page (normalize them)
+    const foundDates = [];
+    $("td.week-day").each((i, el) => {
+      const txt = $(el).text();
+      const m = txt.match(/(\d{1,2}-\d{1,2}-\d{4})/);
+      if (m) {
+        const raw = m[1].trim();
+        const norm = normalizeDateString(raw);
+        foundDates.push({
+          dayName: txt.split("\n")[0].trim(),
+          dayDate: norm,
+          rawDate: raw,
+        });
+      }
+    });
+
     console.log("🔍 Checking <td.week-day> rows:");
     $("td.week-day").each((i, el) => {
       console.log("   → CELL:", $(el).text().trim());
     });
 
-    // STEP 3: Correct date matching using regex extraction
+    // normalize incoming requested date for matching
+    const requestedNorm = normalizeDateString(date);
+
+    // STEP 3: Correct date matching using normalized extraction
     const dayRow = $("td.week-day")
       .filter((i, el) => {
         const txt = $(el).text();
-
-        // extract date inside cell
-        const match = txt.match(/(\d{2}-\d{2}-\d{4})/);
+        const match = txt.match(/(\d{1,2}-\d{1,2}-\d{4})/);
         if (!match) return false;
-
-        const cellDate = match[1].trim();
-        console.log("🔎 Found cell date:", cellDate, "| Matching:", date);
-
-        return cellDate === date;
+        const cellDateRaw = match[1].trim();
+        const cellDate = normalizeDateString(cellDateRaw);
+        console.log("🔎 Found cell date:", cellDate, "| Matching:", requestedNorm);
+        return cellDate === requestedNorm;
       })
       .closest("tr");
 
     if (!dayRow.length) {
-      console.log("❌ No matching date row found on website.");
-
+      console.log("❌ No matching date row found on website. Returning availableDates:", foundDates);
       return res.json({
         success: false,
         dayName: "",
-        dayDate: date,
+        dayDate: requestedNorm,
         periods: [],
+        availableDates: foundDates,
         message: "No routine found for selected date",
       });
     }
 
     console.log("✅ Matched row found!");
 
-    // Extract dayName + dayDate
+    // Extract dayName + dayDate (normalize the dayDate too)
     const weekText = dayRow.find("td.week-day").text().trim();
-    const dateMatch = weekText.match(/(\d{2}-\d{2}-\d{4})/);
-    const dayDate = dateMatch ? dateMatch[1] : date;
-
+    const dateMatch = weekText.match(/(\d{1,2}-\d{1,2}-\d{4})/);
+    const rawDayDate = dateMatch ? dateMatch[1] : date;
+    const dayDate = normalizeDateString(rawDayDate);
     const dayName = weekText.split("\n")[0].trim();
 
     // STEP 4: Parse periods
@@ -280,10 +308,11 @@ app.post("/routine", async (req, res) => {
     });
 
   } catch (err) {
-    console.error(err);
+    console.error("❌ Routine fetch failed:", err);
     res.status(500).json({ error: "Routine fetch failed" });
   }
 });
+
 
 
 
