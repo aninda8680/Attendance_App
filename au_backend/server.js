@@ -155,6 +155,13 @@ app.post("/routine", async (req, res) => {
     return res.status(400).json({ error: "username, password, date required" });
   }
 
+  // Log the incoming payload to debug differences between Postman and app
+  console.log("📥 /routine payload:", {
+    username,
+    passwordMasked: password ? `${"*".repeat(Math.min(4, password.length))} (len:${password.length})` : null,
+    rawDate: date,
+  });
+
   // helper: normalize date strings to dd-MM-yyyy (always two digits)
   function normalizeDateString(s) {
     if (!s || typeof s !== "string") return s;
