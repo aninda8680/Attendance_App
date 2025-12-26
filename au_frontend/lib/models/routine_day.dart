@@ -1,53 +1,40 @@
+// lib/models/routine_day.dart
+import 'routine_period.dart';
+
 class RoutineDay {
-  final String selected;
+  final bool success;
   final String dayName;
   final String dayDate;
   final List<RoutinePeriod> periods;
+  final String? message;
 
   RoutineDay({
-    required this.selected,
+    required this.success,
     required this.dayName,
     required this.dayDate,
     required this.periods,
+    this.message,
   });
 
   factory RoutineDay.fromJson(Map<String, dynamic> json) {
+    final periodsJson = json['periods'] as List<dynamic>? ?? [];
+
     return RoutineDay(
-      selected: json['selected'],
-      dayName: json['dayName'],
-      dayDate: json['dayDate'],
-      periods: (json['periods'] as List)
-          .map((e) => RoutinePeriod.fromJson(e))
+      success: json['success'] == true,
+      dayName: (json['dayName'] ?? '') as String,
+      dayDate: (json['dayDate'] ?? '') as String,
+      periods: periodsJson
+          .map((p) => RoutinePeriod.fromJson(p as Map<String, dynamic>))
           .toList(),
+      message: json['message'] as String?,
     );
   }
-}
 
-class RoutinePeriod {
-  final String subject;
-  final String teacher;
-  final String room;
-  final String attendance;
-  final int periodIndex;
-  final int colspan;
-
-  RoutinePeriod({
-    required this.subject,
-    required this.teacher,
-    required this.room,
-    required this.attendance,
-    required this.periodIndex,
-    required this.colspan,
-  });
-
-  factory RoutinePeriod.fromJson(Map<String, dynamic> json) {
-    return RoutinePeriod(
-      subject: json['subject'],
-      teacher: json['teacher'],
-      room: json['room'],
-      attendance: json['attendance'],
-      periodIndex: json['periodIndex'],
-      colspan: json['colspan'],
-    );
-  }
+  Map<String, dynamic> toJson() => {
+        'success': success,
+        'dayName': dayName,
+        'dayDate': dayDate,
+        'periods': periods.map((p) => p.toJson()).toList(),
+        'message': message,
+      };
 }

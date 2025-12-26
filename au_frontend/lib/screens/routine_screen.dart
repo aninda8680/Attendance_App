@@ -1,348 +1,681 @@
+// routine_screen.dart
+import 'dart:convert';
 import 'package:flutter/material.dart';
+import 'package:http/http.dart' as http;
 import 'package:intl/intl.dart';
-import '../services/routine_api.dart';
-import '../models/routine_day.dart';
+import 'package:au_frontend/services/secure_storage.dart';
+import 'package:au_frontend/components/routine_fab.dart';
 
-List<String> monthNames = [
-    "January",
-    "February",
-    "March",
-    "April",
-    "May",
-    "June",
-    "July",
-    "August",
-    "September",
-    "October",
-    "November",
-    "December",
-  ];
+
+
+const String API_BASE = 'https://attendance-app-vfsw.onrender.com';
 
 class RoutineScreen extends StatefulWidget {
-  final String username;
-  final String password;
-
-  const RoutineScreen({
-    super.key,
-    required this.username,
-    required this.password,
-  });
+  const RoutineScreen({Key? key}) : super(key: key);
 
   @override
-  State<RoutineScreen> createState() => _RoutineScreenState();
+  _RoutineScreenState createState() => _RoutineScreenState();
 }
 
 class _RoutineScreenState extends State<RoutineScreen> {
-  DateTime selectedDate = DateTime.now();
-  int selectedMonth = DateTime.now().month;
-  int selectedWeek = 1;
-  Future<RoutineDay>? futureRoutine;
+  bool _loading = false;
+  String _error = '';
+  String _dayName = '';
+  String _dayDate = '';
+  List<RoutinePeriod> _periods = [];
+  DateTime _selectedDate = DateTime.now();
 
   @override
   void initState() {
     super.initState();
-    selectedWeek = getWeekOfMonth(selectedDate);
-    loadRoutine();
+    _fetchRoutineForDate(_selectedDate);
   }
 
-  int getWeekOfMonth(DateTime date) {
-    return ((date.day - 1) ~/ 7) + 1;
+  String _formatDate(DateTime dt) {
+    return DateFormat('dd-MM-yyyy').format(dt);
   }
 
-  void loadRoutine() {
+  // ---------------- STATUS COLORS & GRADIENTS ----------------
+
+  List<Color> _getStatusGradient(String status) {
+    if (status == 'P') {
+      return [Colors.green.shade400, Colors.green.shade700];
+    } else if (status == 'A') {
+      return [Colors.red.shade400, Colors.red.shade700];
+    }
+    return [Colors.grey.shade300, Colors.grey.shade400];
+  }
+
+  Color _getStatusIconColor(String status) {
+    if (status == 'P') return Colors.green.shade700;
+    if (status == 'A') return Colors.red.shade700;
+    return Colors.grey.shade600;
+  }
+
+  IconData _getStatusIcon(String status) {
+    if (status == 'P') return Icons.check_circle;
+    if (status == 'A') return Icons.cancel;
+    return Icons.remove_circle;
+  }
+
+  // ---------------- API ----------------
+
+  Future<void> _fetchRoutineForDate(DateTime date) async {
     setState(() {
-      futureRoutine = RoutineAPI.fetchRoutine(
-        widget.username,
-        widget.password,
-        selectedDate,
+      _loading = true;
+      _error = '';
+      _periods.clear();
+      _dayName = '';
+      _dayDate = '';
+    });
+
+    try {
+      final username = await SecureStore.readUsername();
+      final password = await SecureStore.readPassword();
+
+      if (username == null || password == null) {
+        setState(() {
+          _error = 'Missing credentials. Please login again.';
+          _loading = false;
+        });
+        return;
+      }
+
+      final resp = await http.post(
+        Uri.parse('$API_BASE/routine'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({
+          "username": username,
+          "password": password,
+          "date": _formatDate(date),
+        }),
       );
-    });
+
+      if (resp.statusCode != 200) {
+        setState(() {
+          _error = 'Server error: ${resp.statusCode}';
+          _loading = false;
+        });
+        return;
+      }
+
+      final data = jsonDecode(resp.body);
+
+      if (data['success'] != true) {
+        setState(() {
+          _error = data['message'] ?? 'No routine found';
+          _loading = false;
+        });
+        return;
+      }
+
+      setState(() {
+        _dayName = data['dayName'] ?? '';
+        _dayDate = data['dayDate'] ?? _formatDate(date);
+        _periods = (data['periods'] as List)
+            .map((e) => RoutinePeriod.fromJson(e))
+            .toList();
+        _loading = false;
+      });
+    } catch (e) {
+      setState(() {
+        _error = 'Failed to fetch routine';
+        _loading = false;
+      });
+    }
   }
 
-  void changeDate(DateTime newDate) {
-    setState(() {
-      selectedDate = newDate;
-      selectedMonth = newDate.month;
-      selectedWeek = getWeekOfMonth(newDate);
-      loadRoutine();
-    });
+  // ---------------- DATE PICKER ----------------
+
+  Future<void> _pickDate() async {
+    final picked = await showDatePicker(
+      context: context,
+      initialDate: _selectedDate,
+      firstDate: DateTime(2020),
+      lastDate: DateTime(2035),
+    );
+
+    if (picked != null) {
+      setState(() => _selectedDate = picked);
+      _fetchRoutineForDate(picked);
+    }
   }
+
+  void _goToPreviousDay() {
+    final prevDate = _selectedDate.subtract(const Duration(days: 1));
+    setState(() => _selectedDate = prevDate);
+    _fetchRoutineForDate(prevDate);
+  }
+
+  void _goToNextDay() {
+    final nextDate = _selectedDate.add(const Duration(days: 1));
+    setState(() => _selectedDate = nextDate);
+    _fetchRoutineForDate(nextDate);
+  }
+
+  // ---------------- PERIOD CARD ----------------
+
+  Widget _buildPeriodCard(RoutinePeriod p, int index) {
+    final bool hasClass = p.subject.isNotEmpty;
+    final bool isFreeLike = p.subject.isEmpty || p.attendance.isEmpty;
+
+
+    final gradient = isFreeLike
+    ? [Colors.white, Colors.grey.shade50]
+    : _getStatusGradient(p.attendance);
+
+    final statusIcon = _getStatusIcon(p.attendance);
+    final statusColor = _getStatusIconColor(p.attendance);
+
+    return TweenAnimationBuilder<double>(
+      duration: Duration(milliseconds: 300 + (index * 50)),
+      tween: Tween(begin: 0.0, end: 1.0),
+      curve: Curves.easeOutCubic,
+      builder: (context, value, child) {
+        return Transform.translate(
+          offset: Offset(0, 20 * (1 - value)),
+          child: Opacity(opacity: value, child: child),
+        );
+      },
+      child: Container(
+        margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+        decoration: BoxDecoration(
+          gradient: LinearGradient(
+  colors: gradient,
+  begin: Alignment.topLeft,
+  end: Alignment.bottomRight,
+),
+
+          borderRadius: BorderRadius.circular(20),
+          boxShadow: [
+            BoxShadow(
+              color: (hasClass ? gradient[0] : Colors.grey.shade300)
+                  .withOpacity(0.3),
+              blurRadius: 12,
+              offset: const Offset(0, 6),
+              spreadRadius: 0,
+            ),
+          ],
+        ),
+        child: Material(
+          color: Colors.transparent,
+          child: InkWell(
+            borderRadius: BorderRadius.circular(20),
+            onTap: () {},
+            child: Padding(
+              padding: const EdgeInsets.all(16),
+              child: Row(
+                children: [
+                  // Period Number Badge
+                  // Period Number Badge (SMALLER)
+Container(
+  width: 40,   // ⬅ reduced from 56
+  height: 40,  // ⬅ reduced from 56
+  decoration: BoxDecoration(
+    color: Colors.white.withOpacity(0.95),
+    shape: BoxShape.circle,
+    boxShadow: [
+      BoxShadow(
+        color: Colors.black.withOpacity(0.08),
+        blurRadius: 6,
+        offset: const Offset(0, 2),
+      ),
+    ],
+  ),
+  child: Center(
+    child: Text(
+      '${p.period}',
+      style: TextStyle(
+        fontSize: 14, // ⬅ reduced from 20
+        fontWeight: FontWeight.w600,
+        color: isFreeLike ? Colors.grey.shade700 : gradient[0],
+      ),
+    ),
+  ),
+),
+
+                  const SizedBox(width: 16),
+                  // Subject & Details
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          hasClass ? p.subject : 'Free Period',
+                          style: TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.bold,
+                            color: isFreeLike
+    ? Colors.grey.shade800
+    : Colors.white,
+
+                            height: 1.2,
+                          ),
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                        if (hasClass && p.teacher.isNotEmpty) ...[
+                          const SizedBox(height: 6),
+                          Row(
+                            children: [
+                              Icon(
+                                Icons.person_outline,
+                                size: 14,
+                                color: isFreeLike
+    ? Colors.grey.shade600
+    : Colors.white.withOpacity(0.9),
+
+                              ),
+                              const SizedBox(width: 4),
+                              Expanded(
+                                child: Text(
+                                  p.teacher,
+                                  style: TextStyle(
+                                    fontSize: 13,
+                                    color: isFreeLike
+    ? Colors.grey.shade600
+    : Colors.white.withOpacity(0.9),
+
+                                  ),
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ],
+                        if (hasClass && p.room.isNotEmpty) ...[
+                          const SizedBox(height: 4),
+                          Row(
+                            children: [
+                              Icon(
+                                Icons.location_on_outlined,
+                                size: 14,
+                                color: hasClass
+                                    ? Colors.white.withOpacity(0.9)
+                                    : Colors.grey.shade600,
+                              ),
+                              const SizedBox(width: 4),
+                              Expanded(
+                                child: Text(
+                                  p.room,
+                                  style: TextStyle(
+                                    fontSize: 13,
+                                    color: isFreeLike
+    ? Colors.grey.shade600
+    : Colors.white.withOpacity(0.9),
+
+                                  ),
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ],
+                      ],
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  // Attendance Status Badge
+                  if (!isFreeLike)
+  Container(
+    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+    decoration: BoxDecoration(
+      color: Colors.white.withOpacity(0.95),
+      borderRadius: BorderRadius.circular(12),
+    ),
+    child: Row(
+      children: [
+        Icon(statusIcon, size: 18, color: statusColor),
+        const SizedBox(width: 4),
+        Text(
+          p.attendance,
+          style: TextStyle(
+            fontSize: 14,
+            fontWeight: FontWeight.bold,
+            color: statusColor,
+          ),
+        ),
+      ],
+    ),
+  ),
+
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  // ---------------- UI ----------------
 
   @override
   Widget build(BuildContext context) {
-    final formatted = DateFormat("dd-MM-yyyy").format(selectedDate);
+    final dateLabel = _dayDate.isNotEmpty
+        ? _dayDate
+        : _formatDate(_selectedDate);
+    final dayNameDisplay = _dayName.isNotEmpty
+        ? _dayName
+        : DateFormat('EEEE').format(_selectedDate);
+
+    // Calculate stats
+    final presentCount = _periods.where((p) => p.attendance == 'P').length;
+    final absentCount = _periods.where((p) => p.attendance == 'A').length;
+    final totalClasses = presentCount + absentCount;
 
     return Scaffold(
-      appBar: AppBar(
-        centerTitle: true,
-        title: const Text("Routine"),
-        elevation: 0,
-      ),
-      body: Column(
-        children: [
-          const SizedBox(height: 12),
+      backgroundColor: const Color.fromARGB(255, 225, 229, 255),
+      body: CustomScrollView(
+        slivers: [
+          // Beautiful Gradient Header
+          SliverAppBar(
+  pinned: true,
+  elevation: 4,
+  backgroundColor: Colors.deepPurple,
+  centerTitle: true,
 
-          // -----------------------------
-          // Prev <  DATE  > Next
-          // -----------------------------
-          Row(
-            mainAxisAlignment: MainAxisAlignment.center,
+  leading: IconButton(
+    icon: const Icon(Icons.arrow_back, color: Colors.white),
+    onPressed: () => Navigator.pop(context),
+  ),
+
+  title: const Text(
+    "Class Routine",
+    style: TextStyle(
+      color: Colors.white,
+      fontWeight: FontWeight.w600,
+      fontSize: 25,
+    ),
+  ),
+
+  actions: [
+    IconButton(
+      icon: const Icon(Icons.calendar_today, color: Colors.white),
+      onPressed: _pickDate,
+    ),
+  ],
+),
+
+
+
+
+// Content
+SliverToBoxAdapter(
+  child: Column(
+    children: [
+      // const SizedBox(height: 2), // gap after header
+
+      // ================= DATE NAVIGATION (ALWAYS VISIBLE) =================
+      Container(
+        margin: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(20),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withOpacity(0.05),
+              blurRadius: 10,
+              offset: const Offset(0, 4),
+            ),
+          ],
+        ),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 8),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.spaceEvenly,
             children: [
-              IconButton(
-                icon: const Icon(Icons.chevron_left, size: 26),
-                onPressed: () =>
-                    changeDate(selectedDate.subtract(const Duration(days: 1))),
+              _buildNavButton(
+                icon: Icons.chevron_left,
+                onPressed: _goToPreviousDay,
               ),
               Container(
                 padding: const EdgeInsets.symmetric(
-                  horizontal: 18,
-                  vertical: 8,
+                  horizontal: 20,
+                  vertical: 12,
                 ),
                 decoration: BoxDecoration(
-                  color: Colors.blue.shade50,
+                  gradient: LinearGradient(
+                    colors: [
+                      const Color(0xFF667EEA),
+                      const Color(0xFF764BA2),
+                    ],
+                  ),
                   borderRadius: BorderRadius.circular(12),
                 ),
-                child: Text(
-                  formatted,
-                  style: const TextStyle(
-                    fontSize: 18,
-                    fontWeight: FontWeight.w600,
-                  ),
+                child: Column(
+                  children: [
+                    Text(
+                      dayNameDisplay,
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 16,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      dateLabel,
+                      style: TextStyle(
+                        color: Colors.white.withOpacity(0.9),
+                        fontSize: 12,
+                      ),
+                    ),
+                  ],
                 ),
               ),
-              IconButton(
-                icon: const Icon(Icons.chevron_right, size: 26),
-                onPressed: () =>
-                    changeDate(selectedDate.add(const Duration(days: 1))),
+              _buildNavButton(
+                icon: Icons.chevron_right,
+                onPressed: _goToNextDay,
               ),
             ],
           ),
+        ),
+      ),
 
-          const SizedBox(height: 6),
+      // ================= LOADING INDICATOR =================
+      if (_loading)
+        const Padding(
+          padding: EdgeInsets.only(top: 40),
+          child: CircularProgressIndicator(),
+        ),
 
-          // --------------------------------
-          // Month / Week / Date Inputs
-          // --------------------------------
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 12),
+      // ================= CONTENT (ONLY WHEN NOT LOADING) =================
+      if (!_loading) ...[
+        // Error Message
+        if (_error.isNotEmpty)
+          Container(
+            margin: const EdgeInsets.all(16),
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              color: Colors.red.shade50,
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(color: Colors.red.shade200),
+            ),
             child: Row(
               children: [
-                Expanded(
-                  child: DropdownButtonFormField<int>(
-                    value: selectedMonth,
-                    decoration: const InputDecoration(labelText: "Month"),
-                    items: List.generate(
-                      12,
-                      (i) => DropdownMenuItem(
-                        value: i + 1,
-                        child: Text(monthNames[i]),
-                      ),
-                    ),
-                    onChanged: (v) {
-                      if (v != null) {
-                        DateTime newDate = DateTime(
-                          selectedDate.year,
-                          v,
-                          selectedDate.day,
-                        );
-                        changeDate(newDate);
-                      }
-                    },
+                Container(
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(
+                    color: Colors.red.shade100,
+                    shape: BoxShape.circle,
+                  ),
+                  child: const Icon(
+                    Icons.error_outline,
+                    color: Colors.red,
+                    size: 20,
                   ),
                 ),
-                const SizedBox(width: 10),
+                const SizedBox(width: 12),
                 Expanded(
-                  child: TextFormField(
-                    readOnly: true,
-                    controller: TextEditingController(text: formatted),
-                    decoration: const InputDecoration(labelText: "Pick Date"),
-                    onTap: () async {
-                      final picked = await showDatePicker(
-                        context: context,
-                        initialDate: selectedDate,
-                        firstDate: DateTime(2024),
-                        lastDate: DateTime(2030),
-                      );
-                      if (picked != null) changeDate(picked);
-                    },
+                  child: Text(
+                    _error,
+                    style: const TextStyle(
+                      color: Colors.red,
+                      fontWeight: FontWeight.w500,
+                    ),
                   ),
                 ),
               ],
             ),
           ),
 
-          const SizedBox(height: 8),
-          const Divider(),
-
-          // --------------------------------
-          // Routine List
-          // --------------------------------
-          Expanded(
-            child: FutureBuilder<RoutineDay>(
-              future: futureRoutine,
-              builder: (context, s) {
-                if (!s.hasData) {
-                  return const Center(child: CircularProgressIndicator());
-                }
-
-                final routine = s.data!;
-
-                return ListView(
-                  padding: const EdgeInsets.all(10),
-                  children: [
-                    Center(
-                      child: Text(
-                        "${routine.dayName}  •  ${routine.dayDate}",
-                        style: const TextStyle(
-                          fontSize: 20,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                    ),
-                    const SizedBox(height: 20),
-                    ...routine.periods.map(buildRoutineCard),
-                  ],
-                );
-              },
+        // No data
+        if (_periods.isEmpty && _error.isEmpty)
+          Padding(
+            padding: const EdgeInsets.all(48),
+            child: Column(
+              children: [
+                Icon(
+                  Icons.event_busy,
+                  size: 64,
+                  color: Colors.grey.shade400,
+                ),
+                const SizedBox(height: 16),
+                Text(
+                  'No routine data',
+                  style: TextStyle(
+                    fontSize: 18,
+                    color: Colors.grey.shade600,
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+              ],
             ),
           ),
+
+        // Period Cards
+        if (_periods.isNotEmpty)
+          ListView.builder(
+            shrinkWrap: true,
+            physics: const NeverScrollableScrollPhysics(),
+            itemCount: _periods.length,
+            padding: const EdgeInsets.only(bottom: 24),
+            itemBuilder: (context, index) =>
+                _buildPeriodCard(_periods[index], index),
+          ),
+      ],
+    ],
+  ),
+),
+
         ],
       ),
+
+      floatingActionButton: SafeArea(
+    child: RoutineFAB(
+      onRefresh: () async {
+        await _fetchRoutineForDate(_selectedDate);
+      },
+    ),
+  ),
     );
   }
 
-  Widget buildRoutineTable(RoutineDay routine) {
-    return Table(
-      border: TableBorder.all(color: Colors.grey.shade400),
-      columnWidths: const {0: FixedColumnWidth(60), 1: FlexColumnWidth()},
-      children: [
-        TableRow(
-          decoration: BoxDecoration(color: Colors.grey.shade300),
-          children: const [
-            Padding(
-              padding: EdgeInsets.all(6),
-              child: Text("P#", textAlign: TextAlign.center),
-            ),
-            Padding(
-              padding: EdgeInsets.all(6),
-              child: Text("Details", textAlign: TextAlign.center),
-            ),
-          ],
-        ),
-
-        ...routine.periods.map((p) {
-          return TableRow(
-            children: [
-              Padding(
-                padding: const EdgeInsets.all(8),
-                child: Text("P${p.periodIndex}", textAlign: TextAlign.center),
-              ),
-              Padding(
-                padding: const EdgeInsets.all(8),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.center,
-                  children: [
-                    Text(
-                      p.subject,
-                      textAlign: TextAlign.center,
-                      style: const TextStyle(
-                        fontWeight: FontWeight.bold,
-                        fontSize: 15,
-                      ),
-                    ),
-                    Text(p.teacher),
-                    Text(p.room, style: TextStyle(color: Colors.grey.shade600)),
-                    const SizedBox(height: 6),
-                    CircleAvatar(
-                      radius: 12,
-                      backgroundColor: p.attendance == "P"
-                          ? Colors.green
-                          : Colors.red,
-                      child: Text(
-                        p.attendance,
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontSize: 13,
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          );
-        }),
-      ],
-    );
-  }
-
-  Widget buildRoutineCard(RoutinePeriod p) {
-    Color attendanceColor = p.attendance == "P"
-        ? Colors.green
-        : p.attendance == "A"
-        ? Colors.red
-        : Colors.grey;
-
+  Widget _buildStatCard(
+    String label,
+    String value,
+    Color color,
+    IconData icon,
+  ) {
     return Container(
-      margin: const EdgeInsets.only(bottom: 15),
-      padding: const EdgeInsets.all(14),
+      padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
         color: Colors.white,
-        borderRadius: BorderRadius.circular(14),
+        borderRadius: BorderRadius.circular(16),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.08),
+            color: Colors.black.withOpacity(0.05),
             blurRadius: 8,
-            offset: const Offset(0, 3),
+            offset: const Offset(0, 2),
           ),
         ],
       ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+      child: Row(
         children: [
-          Row(
+          Container(
+            padding: const EdgeInsets.all(10),
+            decoration: BoxDecoration(
+              color: color.withOpacity(0.1),
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: Icon(icon, color: color, size: 24),
+          ),
+          const SizedBox(width: 12),
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Container(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 12,
-                  vertical: 6,
-                ),
-                decoration: BoxDecoration(
-                  color: Colors.blue.shade100,
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                child: Text(
-                  "Period ${p.periodIndex}",
-                  style: const TextStyle(fontWeight: FontWeight.bold),
+              Text(
+                value,
+                style: TextStyle(
+                  fontSize: 24,
+                  fontWeight: FontWeight.bold,
+                  color: color,
                 ),
               ),
-              const Spacer(),
-              CircleAvatar(
-                radius: 14,
-                backgroundColor: attendanceColor,
-                child: Text(
-                  p.attendance,
-                  style: const TextStyle(color: Colors.white, fontSize: 14),
+              Text(
+                label,
+                style: TextStyle(
+                  fontSize: 12,
+                  color: Colors.grey.shade600,
+                  fontWeight: FontWeight.w500,
                 ),
               ),
             ],
-          ),
-          const SizedBox(height: 12),
-          Text(
-            p.subject,
-            style: const TextStyle(fontSize: 17, fontWeight: FontWeight.bold),
-          ),
-          const SizedBox(height: 4),
-          Text(p.teacher, style: const TextStyle(fontSize: 15)),
-          const SizedBox(height: 4),
-          Text(
-            p.room,
-            style: TextStyle(fontSize: 14, color: Colors.grey.shade600),
           ),
         ],
       ),
     );
   }
 
-  
+  Widget _buildNavButton({
+    required IconData icon,
+    required VoidCallback onPressed,
+  }) {
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onPressed,
+        borderRadius: BorderRadius.circular(12),
+        child: Container(
+          padding: const EdgeInsets.all(12),
+          decoration: BoxDecoration(
+            color: Colors.grey.shade100,
+            borderRadius: BorderRadius.circular(12),
+          ),
+          child: Icon(icon, color: Colors.grey.shade700),
+        ),
+      ),
+    );
+  }
+}
+
+// ---------------- MODEL ----------------
+
+class RoutinePeriod {
+  final int period;
+  final String subject;
+  final String teacher;
+  final String attendance;
+  final String room;
+
+  RoutinePeriod({
+    required this.period,
+    required this.subject,
+    required this.teacher,
+    required this.attendance,
+    required this.room,
+  });
+
+  factory RoutinePeriod.fromJson(Map<String, dynamic> json) {
+    return RoutinePeriod(
+      period: int.tryParse('${json['period']}') ?? 0,
+      subject: json['subject']?.toString() ?? '',
+      teacher: json['teacher']?.toString() ?? '',
+      attendance: json['attendance']?.toString() ?? '',
+      room: json['room']?.toString() ?? '',
+    );
+  }
 }

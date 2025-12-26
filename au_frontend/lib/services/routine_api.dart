@@ -1,32 +1,52 @@
+// lib/services/routine_api.dart
 import 'dart:convert';
 import 'package:http/http.dart' as http;
 import '../models/routine_day.dart';
 
-class RoutineAPI {
-  static const String baseUrl = "https://attendance-app-vfsw.onrender.com";
+class RoutineApi {
+  static const String BASE = "https://attendance-app-vfsw.onrender.com";
 
-  static Future<RoutineDay> fetchRoutine(
-    String username,
-    String password,
-    DateTime date,
-  ) async {
-    final uri = Uri.parse("$baseUrl/routine");
+  static Future<RoutineDay> fetchRoutine({
+    required String username,
+    required String password,
+    required String date,
+  }) async {
+    final uri = Uri.parse("$BASE/routine");
+    print("API URL => $uri");
 
-    final res = await http.post(
+    final response = await http.post(
       uri,
-      headers: {"Content-Type": "application/json"},
+      headers: {
+        "Content-Type": "application/json",
+        "Accept": "application/json",
+        "Cache-Control": "no-cache",
+        "Pragma": "no-cache",
+        "Expires": "0",
+        // helpful UA for some servers
+        "User-Agent": "Mozilla/5.0 (Flutter)",
+      },
       body: jsonEncode({
         "username": username,
         "password": password,
-        "date": "${date.toIso8601String().split('T')[0]}"
+        "date": date,
       }),
     );
 
-    if (res.statusCode != 200) {
-      throw Exception("Failed: ${res.body}");
+    print("HTTP STATUS: ${response.statusCode}");
+    print("RAW RESPONSE: ${response.body}");
+
+    if (response.statusCode != 200) {
+      // try parse possible JSON error message
+      try {
+        final err = jsonDecode(response.body);
+        final msg = err['error'] ?? err['message'] ?? response.body;
+        throw Exception("Server error: $msg");
+      } catch (_) {
+        throw Exception("Server returned status ${response.statusCode}");
+      }
     }
 
-    final json = jsonDecode(res.body);
-    return RoutineDay.fromJson(json);
+    final jsonMap = jsonDecode(response.body) as Map<String, dynamic>;
+    return RoutineDay.fromJson(jsonMap);
   }
 }

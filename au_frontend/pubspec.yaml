@@ -2,7 +2,7 @@ name: au_frontend
 description: "A new Flutter project."
 publish_to: 'none'
 
-version: 1.0.0+1
+version: 1.0.1+1
 
 environment:
   sdk: ^3.9.2
@@ -41,3 +41,4 @@ flutter:
   # ✅ Make sure the icon exists under assets/icon/
   assets:
     - assets/icons/logo.png
+    - shorebird.yaml
