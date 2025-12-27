@@ -5,6 +5,9 @@ import { CookieJar } from "tough-cookie";
 import { wrapper } from "axios-cookiejar-support";
 
 const app = express();
+// 🔐 Temporary in-memory FCM token store
+const userFcmTokens = new Map();
+
 app.use(express.json());
 
 const BASE_URL = "https://adamasknowledgecity.ac.in";
@@ -21,6 +24,34 @@ const BASE_URL = "https://adamasknowledgecity.ac.in";
 app.get("/", (req, res) => {
   res.send("✅ Adamas Attendance API is live. Use POST /attendance");
 });
+
+
+
+
+
+
+app.post("/save-fcm-token", (req, res) => {
+  const { username, fcmToken } = req.body;
+
+  console.log("📩 /save-fcm-token:", req.body);
+
+  if (!username || !fcmToken) {
+    return res.status(400).json({
+      success: false,
+      message: "username and fcmToken required",
+    });
+  }
+
+  // Save / update token
+  userFcmTokens.set(username, fcmToken);
+
+  console.log("✅ FCM token saved for:", username);
+
+  return res.status(200).json({
+    success: true,
+  });
+});
+
 
 
 
