@@ -4,8 +4,6 @@ import 'package:au_frontend/models/attendance_item.dart';
 import 'package:au_frontend/services/api.dart';
 import 'package:au_frontend/services/secure_storage.dart';
 import 'login_screen.dart';
-import 'dart:math' as math;
-import 'bunk_calculator_screen.dart';
 import 'loading.dart';
 import 'package:au_frontend/components/animated_action_button.dart';
 import 'package:au_frontend/components/attendance_fab.dart';

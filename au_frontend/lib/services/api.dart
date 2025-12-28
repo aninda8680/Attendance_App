@@ -16,13 +16,8 @@ class Api {
     try {
       final resp = await http.post(
         url,
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: jsonEncode({
-          'username': username,
-          'password': password,
-        }),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({'username': username, 'password': password}),
       );
 
       // Successful request
@@ -35,15 +30,14 @@ class Api {
       }
 
       if (resp.statusCode == 403 ||
-              resp.statusCode == 500 ||
-              resp.statusCode == 502 ||
-              resp.statusCode == 503 ||
-              resp.statusCode == 504) {
-            throw ApiError(
-              "The college server is currently unavailable.\nPlease try again later."
-            );
-          }
-
+          resp.statusCode == 500 ||
+          resp.statusCode == 502 ||
+          resp.statusCode == 503 ||
+          resp.statusCode == 504) {
+        throw ApiError(
+          "The college server is currently unavailable.\nPlease try again later.",
+        );
+      }
 
       // Invalid credentials
       if (resp.statusCode == 401) {
@@ -60,7 +54,6 @@ class Api {
           'Please try again later. (Error ${resp.statusCode})',
         );
       }
-
     } on SocketException catch (_) {
       // DNS failure / host not reachable / network down
       throw ApiError(
@@ -75,9 +68,65 @@ class Api {
       );
     } catch (e) {
       // Catch-all fallback
-      throw ApiError(
-        'Something went wrong.\n$e',
+      throw ApiError('Something went wrong.\n$e');
+    }
+  }
+
+  static Future<void> saveFcmToken({
+    required String username,
+    required String fcmToken,
+  }) async {
+    final url = Uri.parse('$API_BASE/save-fcm-token');
+
+    try {
+      final resp = await http.post(
+        url,
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({'username': username, 'fcmToken': fcmToken}),
       );
+
+      if (resp.statusCode != 200) {
+        throw ApiError('Failed to register device for notifications');
+      }
+    } on SocketException {
+      // Ignore silently — token will retry next login
+      throw ApiError('Network unavailable while saving FCM token');
+    } catch (e) {
+      throw ApiError('FCM token error: $e');
+    }
+  }
+
+  static Future<void> registerUser({
+    required String username,
+    required String password,
+    required String fcmToken,
+  }) async {
+    final url = Uri.parse('$API_BASE/register-user');
+    try {
+      final resp = await http.post(
+        url,
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({
+          'username': username,
+          'password': password,
+          'fcmToken': fcmToken,
+        }),
+      );
+
+      if (resp.statusCode != 200) {
+        // capture backend error message if any
+        String errMsg = 'Registration failed';
+        try {
+          final data = jsonDecode(resp.body) as Map<String, dynamic>;
+          if (data['message'] != null) errMsg = data['message'].toString();
+          if (data['error'] != null) errMsg = data['error'].toString();
+        } catch (_) {}
+        throw ApiError(errMsg);
+      }
+    } on SocketException {
+      throw ApiError('Network unavailable while registering user');
+    } catch (e) {
+      throw ApiError('Register user error: $e');
     }
   }
 }

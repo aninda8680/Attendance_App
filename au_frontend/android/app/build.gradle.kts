@@ -2,6 +2,7 @@ plugins {
     id("com.android.application")
     id("kotlin-android")
     id("dev.flutter.flutter-gradle-plugin")
+    id("com.google.gms.google-services") 
 }
 
 android {
@@ -19,7 +20,7 @@ android {
     }
 
     defaultConfig {
-        applicationId = "com.example.au_frontend"
+        applicationId = "com.example.au_attendance"
         minSdk = flutter.minSdkVersion
         targetSdk = flutter.targetSdkVersion
         versionCode = flutter.versionCode
@@ -46,6 +47,12 @@ android {
                     println("✅ APK renamed to: ${outputImpl.outputFileName}")
                 }
             }
+
+            dependencies {
+            implementation(platform("com.google.firebase:firebase-bom:34.7.0"))
+            implementation("com.google.firebase:firebase-messaging")
+        }
+
 
 }
 

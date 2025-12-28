@@ -2,6 +2,9 @@ import 'package:flutter/material.dart';
 import 'package:au_frontend/services/secure_storage.dart';
 import 'package:au_frontend/screens/attendance_screen.dart';
 import 'dart:math' as math;
+import 'dart:convert';
+import 'package:au_frontend/services/api.dart';
+import 'package:firebase_messaging/firebase_messaging.dart';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -37,11 +40,46 @@ class _LoginScreenState extends State<LoginScreen>
     super.dispose();
   }
 
+  Future<void> _sendFcmTokenToBackend({required String password}) async {
+    try {
+      final token = await FirebaseMessaging.instance.getToken();
+      if (token == null) return;
+
+      final username = await SecureStore.readUsername();
+      if (username == null) return;
+
+      // Prefer full registration so backend can poll even when app is closed
+      try {
+        await Api.registerUser(
+          username: username,
+          password: password,
+          fcmToken: token,
+        );
+        debugPrint('✅ User registered for background polling');
+      } catch (e) {
+        // Fallback to simple token save to still enable notifications
+        debugPrint(
+          '⚠️ register-user failed, falling back to save-fcm-token: $e',
+        );
+        await Api.saveFcmToken(username: username, fcmToken: token);
+        debugPrint('✅ FCM token registered');
+      }
+    } catch (e) {
+      // ❗ Do NOT block login
+      debugPrint('⚠️ FCM token save failed: $e');
+    }
+  }
+
   Future<void> _onLogin() async {
     if (!_formKey.currentState!.validate()) return;
     setState(() => _loading = true);
+
     try {
       await SecureStore.saveCreds(_userCtrl.text.trim(), _passCtrl.text);
+
+      // 🔥 SEND FCM TOKEN + REGISTER AFTER LOGIN
+      await _sendFcmTokenToBackend(password: _passCtrl.text);
+
       if (!mounted) return;
       Navigator.of(context).pushAndRemoveUntil(
         MaterialPageRoute(builder: (_) => const AttendanceScreen()),
@@ -84,7 +122,8 @@ class _LoginScreenState extends State<LoginScreen>
                         animation: _controller,
                         builder: (context, _) {
                           final scale =
-                              1 + 0.05 * math.sin(_controller.value * 2 * math.pi);
+                              1 +
+                              0.05 * math.sin(_controller.value * 2 * math.pi);
                           return Transform.scale(
                             scale: scale,
                             child: const Icon(
@@ -143,7 +182,8 @@ class _LoginScreenState extends State<LoginScreen>
                                     borderRadius: BorderRadius.circular(12),
                                   ),
                                 ),
-                                validator: (v) => (v == null || v.trim().isEmpty)
+                                validator: (v) =>
+                                    (v == null || v.trim().isEmpty)
                                     ? 'Enter username'
                                     : null,
                               ),
@@ -167,10 +207,9 @@ class _LoginScreenState extends State<LoginScreen>
                                   ),
                                 ),
                                 obscureText: _obscure,
-                                validator: (v) =>
-                                    (v == null || v.isEmpty)
-                                        ? 'Enter password'
-                                        : null,
+                                validator: (v) => (v == null || v.isEmpty)
+                                    ? 'Enter password'
+                                    : null,
                               ),
                               const SizedBox(height: 20),
                               SizedBox(
@@ -209,19 +248,18 @@ class _LoginScreenState extends State<LoginScreen>
                       const SizedBox(height: 24),
 
                       Padding(
-                      padding: const EdgeInsets.only(top: 16.0),
-                      child: Text(
-                        "If you forgot your password, visit the official website.",
-                        textAlign: TextAlign.center,
-                        style: const TextStyle(
-                          color: Colors.white70,
-                          fontSize: 13,
-                          fontWeight: FontWeight.w400,
-                          letterSpacing: 0.3,
+                        padding: const EdgeInsets.only(top: 16.0),
+                        child: Text(
+                          "If you forgot your password, visit the official website.",
+                          textAlign: TextAlign.center,
+                          style: const TextStyle(
+                            color: Colors.white70,
+                            fontSize: 13,
+                            fontWeight: FontWeight.w400,
+                            letterSpacing: 0.3,
+                          ),
                         ),
                       ),
-                    ),
-
                     ],
                   ),
                 ),

@@ -5,6 +5,8 @@ import 'package:http/http.dart' as http;
 import 'package:intl/intl.dart';
 import 'package:au_frontend/services/secure_storage.dart';
 import 'package:au_frontend/components/routine_fab.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+
 
 
 
@@ -117,13 +119,121 @@ class _RoutineScreenState extends State<RoutineScreen> {
             .toList();
         _loading = false;
       });
+      // 🔔 Detect P/A change and notify
+_checkForAttendanceChange(_periods);
+
     } catch (e) {
       setState(() {
         _error = 'Failed to fetch routine';
         _loading = false;
       });
     }
+
+    
   }
+
+Future<void> _checkForAttendanceChange(
+  List<RoutinePeriod> newPeriods,
+) async {
+  final prefs = await SharedPreferences.getInstance();
+
+  // 🔑 Get username once
+  final username = await SecureStore.readUsername() ?? 'unknown';
+
+  for (final p in newPeriods) {
+    // Skip free periods
+    if (p.subject.isEmpty || p.attendance.isEmpty) continue;
+
+    // ✅ UNIQUE KEY: user + date + subject
+    final key = 'attendance_${username}_${_dayDate}_${p.subject}';
+
+    final oldStatus = prefs.getString(key);
+    final newStatus = p.attendance;
+
+    // 🔔 NOTIFY WHEN:
+    // 1️⃣ First time of the day (oldStatus == null)
+    // 2️⃣ Attendance changes (P ↔ A)
+    if (oldStatus == null || oldStatus != newStatus) {
+      final statusText = newStatus == 'P' ? 'PRESENT' : 'ABSENT';
+
+      _showTopNotification(
+        title: statusText,
+        body: 'in ${p.subject}',
+      );
+    }
+
+    // 💾 Save latest status
+    await prefs.setString(key, newStatus);
+  }
+}
+
+
+
+void _showTopNotification({
+  required String title,
+  required String body,
+}) {
+  final overlay = Overlay.of(context);
+  if (overlay == null) return;
+
+  late OverlayEntry entry;
+
+  entry = OverlayEntry(
+    builder: (context) => Positioned(
+      top: MediaQuery.of(context).padding.top + 12,
+      left: 16,
+      right: 16,
+      child: Material(
+        color: Colors.transparent,
+        child: Container(
+          padding: const EdgeInsets.all(14),
+          decoration: BoxDecoration(
+            color: Colors.black87,
+            borderRadius: BorderRadius.circular(12),
+            boxShadow: const [
+              BoxShadow(
+                color: Colors.black26,
+                blurRadius: 10,
+                offset: Offset(0, 4),
+              ),
+            ],
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                title,
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontWeight: FontWeight.bold,
+                  fontSize: 15,
+                ),
+              ),
+              const SizedBox(height: 4),
+              Text(
+                body,
+                style: const TextStyle(
+                  color: Colors.white70,
+                  fontSize: 14,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    ),
+  );
+
+  overlay.insert(entry);
+
+  // Auto dismiss after 3 seconds
+  Future.delayed(const Duration(seconds: 3), () {
+    entry.remove();
+  });
+}
+
+
 
   // ---------------- DATE PICKER ----------------
 
