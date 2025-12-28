@@ -1,9 +1,16 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:au_frontend/screens/login_screen.dart';
 import 'package:au_frontend/screens/attendance_screen.dart';
+import 'package:au_frontend/screens/routine_screen.dart'; // ✅ ADDED
 import 'package:au_frontend/services/secure_storage.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
+
+/// ✅ GLOBAL NAVIGATOR KEY (ADDED)
+final GlobalKey<NavigatorState> navigatorKey =
+    GlobalKey<NavigatorState>();
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -17,6 +24,7 @@ class AttendanceApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
+      navigatorKey: navigatorKey, // ✅ ADDED
       title: 'Attendance',
       theme: ThemeData(
         colorScheme: ColorScheme.fromSeed(seedColor: Colors.indigo),
@@ -38,29 +46,55 @@ class _Bootstrapper extends StatefulWidget {
 class _BootstrapperState extends State<_Bootstrapper> {
   Future<bool>? _hasCreds;
 
+  late final StreamSubscription<RemoteMessage> _fcmSub;
+
   @override
   void initState() {
     super.initState();
     _hasCreds = _checkCreds();
-    // 🔥 GET & PRINT FCM TOKEN (MOST IMPORTANT)
+
+    // 🔥 GET & PRINT FCM TOKEN
     FirebaseMessaging.instance.getToken().then((token) {
       debugPrint("🔥 FCM TOKEN: $token");
     });
 
-    // 🔔 FOREGROUND NOTIFICATION LISTENER
-FirebaseMessaging.onMessage.listen((message) {
-  final title = message.notification?.title ?? 'Notification';
-  final body = message.notification?.body ?? '';
+    // 🔔 SAFE FOREGROUND NOTIFICATION LISTENER
+    _fcmSub = FirebaseMessaging.onMessage.listen((message) {
+      if (!mounted) return;
 
-  debugPrint("🔔 FOREGROUND MSG: $title");
+      final notif = message.notification;
+      if (notif == null) return;
 
-  _showTopNotification(
-    title: title,
-    body: body,
-  );
+      debugPrint("🔔 FOREGROUND MSG: ${notif.title}");
+
+      _showTopNotification(
+        title: notif.title ?? 'AU Attendance',
+        body: notif.body ?? '',
+      );
+    });
+
+    // 🔔 Notification tapped (APP IN BACKGROUND)
+FirebaseMessaging.onMessageOpenedApp.listen((message) {
+  debugPrint("📲 Notification tapped (background)");
+  debugPrint("📦 DATA: ${message.data}");
+  _handleNotificationTap(message.data);
 });
 
+// 🔔 Notification tapped (APP TERMINATED)
+FirebaseMessaging.instance.getInitialMessage().then((message) {
+  if (message != null) {
+    debugPrint("📲 Notification tapped (terminated)");
+    debugPrint("📦 DATA: ${message.data}");
+    _handleNotificationTap(message.data);
+  }
+});
 
+  }
+
+  @override
+  void dispose() {
+    _fcmSub.cancel();
+    super.dispose();
   }
 
   Future<bool> _checkCreds() async {
@@ -69,71 +103,90 @@ FirebaseMessaging.onMessage.listen((message) {
     return (u != null && u.isNotEmpty && p != null && p.isNotEmpty);
   }
 
+  /// ✅ NAVIGATE TO ROUTINE SCREEN (ADDED)
+  void _openRoutineScreen() {
+    navigatorKey.currentState?.push(
+      MaterialPageRoute(
+        builder: (_) => const RoutineScreen(),
+      ),
+    );
+  }
+
+void _handleNotificationTap(Map<String, dynamic> data) {
+  final type = data['type'];
+
+  if (type == 'attendance') {
+    _openRoutineScreen();
+  }
+}
+
+
   void _showTopNotification({
-  required String title,
-  required String body,
-}) {
-  final overlay = Overlay.of(context);
-  if (overlay == null) return;
+    required String title,
+    required String body,
+  }) {
+    if (!mounted) return;
 
-  late OverlayEntry entry;
+    final overlay = Overlay.of(context);
+    if (overlay == null) return;
 
-  entry = OverlayEntry(
-    builder: (context) => Positioned(
-      top: MediaQuery.of(context).padding.top + 12,
-      left: 16,
-      right: 16,
-      child: Material(
-        color: Colors.transparent,
-        child: AnimatedContainer(
-          duration: const Duration(milliseconds: 300),
-          padding: const EdgeInsets.all(14),
-          decoration: BoxDecoration(
-            color: Colors.black87,
-            borderRadius: BorderRadius.circular(12),
-            boxShadow: const [
-              BoxShadow(
-                color: Colors.black26,
-                blurRadius: 10,
-                offset: Offset(0, 4),
-              ),
-            ],
-          ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Text(
-                title,
-                style: const TextStyle(
-                  color: Colors.white,
-                  fontWeight: FontWeight.bold,
-                  fontSize: 15,
+    late OverlayEntry entry;
+
+    entry = OverlayEntry(
+      builder: (_) => Positioned(
+        top: MediaQuery.of(context).padding.top + 12,
+        left: 16,
+        right: 16,
+        child: Material(
+          color: Colors.transparent,
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 300),
+            padding: const EdgeInsets.all(14),
+            decoration: BoxDecoration(
+              color: Colors.black87,
+              borderRadius: BorderRadius.circular(12),
+              boxShadow: const [
+                BoxShadow(
+                  color: Colors.black26,
+                  blurRadius: 10,
+                  offset: Offset(0, 4),
                 ),
-              ),
-              const SizedBox(height: 4),
-              Text(
-                body,
-                style: const TextStyle(
-                  color: Colors.white70,
-                  fontSize: 14,
+              ],
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  title,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontWeight: FontWeight.bold,
+                    fontSize: 15,
+                  ),
                 ),
-              ),
-            ],
+                const SizedBox(height: 4),
+                Text(
+                  body,
+                  style: const TextStyle(
+                    color: Colors.white70,
+                    fontSize: 14,
+                  ),
+                ),
+              ],
+            ),
           ),
         ),
       ),
-    ),
-  );
+    );
 
-  overlay.insert(entry);
+    overlay.insert(entry);
 
-  // Auto dismiss
-  Future.delayed(const Duration(seconds: 3), () {
-    entry.remove();
-  });
-}
-
+    // ⏱ Auto dismiss
+    Future.delayed(const Duration(seconds: 3), () {
+      entry.remove();
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
