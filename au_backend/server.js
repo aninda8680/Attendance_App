@@ -1,3 +1,8 @@
+console.log("🚨 BOOT CHECK");
+console.log("🚨 ENV AES_KEY exists:", "AES_KEY" in process.env);
+console.log("🚨 ENV AES_KEY length:", process.env.AES_KEY?.length);
+
+
 import express from "express";
 import axios from "axios";
 import * as cheerio from "cheerio";
