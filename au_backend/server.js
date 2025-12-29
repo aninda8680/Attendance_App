@@ -25,12 +25,21 @@ const BASE_URL = "https://adamasknowledgecity.ac.in";
 // -------------------- AES-256-GCM helpers --------------------
 function getAesKey() {
   const keyB64 = process.env.AES_KEY || "";
+
+  console.log("🔐 AES_KEY present:", Boolean(keyB64));
+  console.log("🔐 AES_KEY (base64) length:", keyB64.length);
+
   const key = Buffer.from(keyB64, "base64");
+
+  console.log("🔐 AES_KEY decoded byte length:", key.length);
+
   if (key.length !== 32) {
     throw new Error("AES_KEY must be 32 bytes base64 (256-bit)");
   }
+
   return key;
 }
+
 
 function encryptPassword(plain) {
   const key = getAesKey();
@@ -182,6 +191,9 @@ app.post("/save-fcm-token", (req, res) => {
     success: true,
   });
 });
+
+
+
 
 // ✅ Register user for background notifications (temporary in-memory storage)
 // Body: { username, password, fcmToken }
@@ -798,6 +810,11 @@ setInterval(async () => {
   }
 }, POLL_INTERVAL_MS);
 
+
+
+
+
+
 // 🩺 Health endpoint
 app.get("/health", async (req, res) => {
   try {
@@ -824,6 +841,10 @@ app.get("/health", async (req, res) => {
   }
 });
 
+
+
+
+
 // 🔧 Quick config diagnostics
 app.get("/config-check", (req, res) => {
   let aesOk = false;
@@ -843,6 +864,11 @@ app.get("/config-check", (req, res) => {
     firebaseInitialized: fbOk,
   });
 });
+
+
+
+
+
 
 // 🧪 Simulation endpoint (does NOT hit university site)
 // Guarded by env SIMULATION_TOKEN; triggers a notification and persists snapshots
