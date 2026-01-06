@@ -1,16 +1,18 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:au_frontend/screens/login_screen.dart';
 import 'package:au_frontend/screens/attendance_screen.dart';
 import 'package:au_frontend/screens/routine_screen.dart'; // ✅ ADDED
 import 'package:au_frontend/services/secure_storage.dart';
+import 'package:au_frontend/services/api.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
+import 'package:permission_handler/permission_handler.dart';
 
 /// ✅ GLOBAL NAVIGATOR KEY (ADDED)
-final GlobalKey<NavigatorState> navigatorKey =
-    GlobalKey<NavigatorState>();
+final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -47,18 +49,52 @@ class _BootstrapperState extends State<_Bootstrapper> {
   Future<bool>? _hasCreds;
 
   late final StreamSubscription<RemoteMessage> _fcmSub;
+  StreamSubscription<String>? _tokenRefreshSub;
 
   @override
   void initState() {
     super.initState();
     _hasCreds = _checkCreds();
 
+    // Android 13+ requires runtime notification permission
+    _ensureNotificationPermission();
+
     // 🔥 GET & PRINT FCM TOKEN
     FirebaseMessaging.instance.getToken().then((token) {
       debugPrint("🔥 FCM TOKEN: $token");
     });
 
+    // 🔄 PERMANENT FCM TOKEN REFRESH LISTENER
+    // Automatically updates backend whenever Firebase rotates the token
+    // This ensures notifications continue working even if token changes silently
+    _tokenRefreshSub = FirebaseMessaging.instance.onTokenRefresh.listen(
+      (newToken) async {
+        debugPrint("🔄 FCM token refreshed: $newToken");
+        
+        // Get username from secure storage (user must be logged in)
+        final username = await SecureStore.readUsername();
+        
+        if (username == null || username.isEmpty) {
+          debugPrint("⚠️ Token refresh: No username found, skipping backend update");
+          return;
+        }
+
+        // Update backend with new token (silently, no UI)
+        try {
+          await Api.saveFcmToken(username: username, fcmToken: newToken);
+          debugPrint("✅ Token refresh: Backend updated successfully for $username");
+        } catch (e) {
+          // Log error but don't block - token will be retried on next app open or login
+          debugPrint("❌ Token refresh: Failed to update backend: $e");
+        }
+      },
+      onError: (error) {
+        debugPrint("❌ Token refresh listener error: $error");
+      },
+    );
+
     // 🔔 SAFE FOREGROUND NOTIFICATION LISTENER
+    // Note: System notifications are handled automatically by FCM
     _fcmSub = FirebaseMessaging.onMessage.listen((message) {
       if (!mounted) return;
 
@@ -66,34 +102,30 @@ class _BootstrapperState extends State<_Bootstrapper> {
       if (notif == null) return;
 
       debugPrint("🔔 FOREGROUND MSG: ${notif.title}");
-
-      _showTopNotification(
-        title: notif.title ?? 'AU Attendance',
-        body: notif.body ?? '',
-      );
+      // System notification will be shown automatically by FCM
     });
 
     // 🔔 Notification tapped (APP IN BACKGROUND)
-FirebaseMessaging.onMessageOpenedApp.listen((message) {
-  debugPrint("📲 Notification tapped (background)");
-  debugPrint("📦 DATA: ${message.data}");
-  _handleNotificationTap(message.data);
-});
+    FirebaseMessaging.onMessageOpenedApp.listen((message) {
+      debugPrint("📲 Notification tapped (background)");
+      debugPrint("📦 DATA: ${message.data}");
+      _handleNotificationTap(message.data);
+    });
 
-// 🔔 Notification tapped (APP TERMINATED)
-FirebaseMessaging.instance.getInitialMessage().then((message) {
-  if (message != null) {
-    debugPrint("📲 Notification tapped (terminated)");
-    debugPrint("📦 DATA: ${message.data}");
-    _handleNotificationTap(message.data);
-  }
-});
-
+    // 🔔 Notification tapped (APP TERMINATED)
+    FirebaseMessaging.instance.getInitialMessage().then((message) {
+      if (message != null) {
+        debugPrint("📲 Notification tapped (terminated)");
+        debugPrint("📦 DATA: ${message.data}");
+        _handleNotificationTap(message.data);
+      }
+    });
   }
 
   @override
   void dispose() {
     _fcmSub.cancel();
+    _tokenRefreshSub?.cancel();
     super.dispose();
   }
 
@@ -103,90 +135,34 @@ FirebaseMessaging.instance.getInitialMessage().then((message) {
     return (u != null && u.isNotEmpty && p != null && p.isNotEmpty);
   }
 
+  Future<void> _ensureNotificationPermission() async {
+    try {
+      if (Platform.isAndroid) {
+        final status = await Permission.notification.status;
+        if (!status.isGranted) {
+          await Permission.notification.request();
+        }
+      }
+    } catch (_) {
+      // best-effort; do not block app startup
+    }
+  }
+
   /// ✅ NAVIGATE TO ROUTINE SCREEN (ADDED)
   void _openRoutineScreen() {
     navigatorKey.currentState?.push(
-      MaterialPageRoute(
-        builder: (_) => const RoutineScreen(),
-      ),
+      MaterialPageRoute(builder: (_) => const RoutineScreen()),
     );
   }
 
-void _handleNotificationTap(Map<String, dynamic> data) {
-  final type = data['type'];
+  void _handleNotificationTap(Map<String, dynamic> data) {
+    final type = data['type'];
 
-  if (type == 'attendance') {
-    _openRoutineScreen();
+    if (type == 'attendance') {
+      _openRoutineScreen();
+    }
   }
-}
 
-
-  void _showTopNotification({
-    required String title,
-    required String body,
-  }) {
-    if (!mounted) return;
-
-    final overlay = Overlay.of(context);
-    if (overlay == null) return;
-
-    late OverlayEntry entry;
-
-    entry = OverlayEntry(
-      builder: (_) => Positioned(
-        top: MediaQuery.of(context).padding.top + 12,
-        left: 16,
-        right: 16,
-        child: Material(
-          color: Colors.transparent,
-          child: AnimatedContainer(
-            duration: const Duration(milliseconds: 300),
-            padding: const EdgeInsets.all(14),
-            decoration: BoxDecoration(
-              color: Colors.black87,
-              borderRadius: BorderRadius.circular(12),
-              boxShadow: const [
-                BoxShadow(
-                  color: Colors.black26,
-                  blurRadius: 10,
-                  offset: Offset(0, 4),
-                ),
-              ],
-            ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Text(
-                  title,
-                  style: const TextStyle(
-                    color: Colors.white,
-                    fontWeight: FontWeight.bold,
-                    fontSize: 15,
-                  ),
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  body,
-                  style: const TextStyle(
-                    color: Colors.white70,
-                    fontSize: 14,
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
-
-    overlay.insert(entry);
-
-    // ⏱ Auto dismiss
-    Future.delayed(const Duration(seconds: 3), () {
-      entry.remove();
-    });
-  }
 
   @override
   Widget build(BuildContext context) {

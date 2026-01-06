@@ -34,11 +34,7 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
   Future<void> _refresh() async {
     setState(() => _future = _load());
     await _future;
-    if (mounted) {
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(const SnackBar(content: Text('Attendance updated')));
-    }
+    // Note: In-app notifications removed - system notifications will be used instead
   }
 
   Future<void> _logout() async {
