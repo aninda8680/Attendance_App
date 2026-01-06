@@ -26,6 +26,12 @@ const lastAttendanceMap = new Map();
 
 app.use(express.json());
 
+// Configurable polling interval (defaults to 30s)
+const POLL_INTERVAL_MS = Number(process.env.POLL_INTERVAL_MS || 30000);
+const POLL_JITTER_PCT = Number(process.env.POLL_JITTER_PCT || 0.3); // ±30% jitter
+const POLL_BACKOFF_MAX_MS = Number(process.env.POLL_BACKOFF_MAX_MS || 15 * 60 * 1000); // 15 minutes cap
+console.log("⏱️ Polling interval (ms):", POLL_INTERVAL_MS, "jitter:", POLL_JITTER_PCT, "backoffMax:", POLL_BACKOFF_MAX_MS);
+
 const BASE_URL = "https://adamasknowledgecity.ac.in";
 // -------------------- AES-256-GCM helpers --------------------
 function getAesKey() {
@@ -73,6 +79,13 @@ function decryptPassword(encObj) {
 
 
 
+/**
+ * Sends FCM notification for attendance update (single attempt, throws on failure)
+ * @param {string} username - Student username
+ * @param {string} status - 'P' or 'A'
+ * @param {string} subject - Subject name
+ * @throws {Error} If FCM send fails or token is missing
+ */
 async function sendAttendancePush(username, status, subject) {
   let token = userFcmTokens.get(username);
   if (!token) {
@@ -93,8 +106,7 @@ async function sendAttendancePush(username, status, subject) {
   }
 
   if (!token) {
-    console.log("⚠️ No FCM token for:", username);
-    return;
+    throw new Error(`No FCM token for user: ${username}`);
   }
 
   const statusText = status === "P" ? "Present" : "Absent";
@@ -118,11 +130,68 @@ async function sendAttendancePush(username, status, subject) {
     },
   };
 
-  try {
-    const res = await admin.messaging().send(message);
-    console.log("✅ Attendance push sent:", res);
-  } catch (err) {
-    console.error("❌ Push failed:", err.message);
+  // Send and throw on failure (retry logic handles this)
+  const res = await admin.messaging().send(message);
+  console.log("✅ Attendance push sent:", res);
+  return res;
+}
+
+/**
+ * Sends FCM notification with retry mechanism (max 3 attempts with exponential backoff)
+ * Retries ONLY on failure, stops immediately on success
+ * @param {string} username - Student username
+ * @param {string} status - 'P' or 'A'
+ * @param {string} subject - Subject name
+ * @returns {Promise<void>} Resolves on success, rejects only after all retries exhausted
+ */
+async function sendAttendancePushWithRetry(username, status, subject) {
+  const MAX_ATTEMPTS = 3;
+  const BACKOFF_DELAYS = [1000, 2000]; // 1s, 2s delays (exponential: 2^0, 2^1)
+
+  let lastError = null;
+
+  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+    try {
+      // Attempt to send notification
+      await sendAttendancePush(username, status, subject);
+      
+      // Success - stop immediately, no retries
+      if (attempt > 1) {
+        console.log(`✅ Push succeeded on attempt ${attempt} for ${username} (${status} in ${subject})`);
+      }
+      return; // Exit successfully
+      
+    } catch (err) {
+      lastError = err;
+      
+      // Check if this is the last attempt
+      if (attempt === MAX_ATTEMPTS) {
+        console.error(
+          `❌ Push failed after ${MAX_ATTEMPTS} attempts for ${username} (${status} in ${subject}):`,
+          err.message
+        );
+        // Don't throw - allow polling to continue for other users
+        return;
+      }
+
+      // Calculate backoff delay (exponential: 1s, 2s)
+      const delayMs = BACKOFF_DELAYS[attempt - 1];
+      console.warn(
+        `⚠️ Push attempt ${attempt}/${MAX_ATTEMPTS} failed for ${username}, retrying in ${delayMs}ms:`,
+        err.message
+      );
+
+      // Wait before retry (non-blocking for other users)
+      await new Promise((resolve) => setTimeout(resolve, delayMs));
+    }
+  }
+
+  // Should never reach here, but handle edge case
+  if (lastError) {
+    console.error(
+      `❌ All retry attempts exhausted for ${username} (${status} in ${subject}):`,
+      lastError.message
+    );
   }
 }
 
@@ -554,7 +623,8 @@ for (const p of periods) {
       to: newStatus,
     });
 
-    await sendAttendancePush(
+    // Use retry mechanism to ensure notification delivery
+    await sendAttendancePushWithRetry(
       username,
       newStatus,
       p.subject
@@ -722,7 +792,8 @@ async function pollUserRoutineAndNotify(username) {
       }
       const newStatus = p.attendance;
       if (oldStatus !== newStatus) {
-        await sendAttendancePush(username, newStatus, p.subject);
+        // Use retry mechanism to ensure notification delivery
+        await sendAttendancePushWithRetry(username, newStatus, p.subject);
         notified = true;
         notifiedSubject = p.subject;
       }
@@ -757,12 +828,6 @@ async function pollUserRoutineAndNotify(username) {
     return false;
   }
 }
-
-// Configurable polling interval (defaults to 30s)
-const POLL_INTERVAL_MS = Number(process.env.POLL_INTERVAL_MS || 30000);
-const POLL_JITTER_PCT = Number(process.env.POLL_JITTER_PCT || 0.3); // ±30% jitter
-const POLL_BACKOFF_MAX_MS = Number(process.env.POLL_BACKOFF_MAX_MS || 15 * 60 * 1000); // 15 minutes cap
-console.log("⏱️ Polling interval (ms):", POLL_INTERVAL_MS, "jitter:", POLL_JITTER_PCT, "backoffMax:", POLL_BACKOFF_MAX_MS);
 
 function _computeNextPoll(nowMs, baseMs, failureCount) {
   // On success, baseMs = POLL_INTERVAL_MS; On failure, baseMs = backoff delay
@@ -896,8 +961,8 @@ app.post("/simulate-notification", async (req, res) => {
   const dayDate = date && typeof date === "string" ? date : _formatDateDDMMYYYY(new Date());
 
   try {
-    // Send push
-    await sendAttendancePush(username, s, subject);
+    // Send push with retry mechanism
+    await sendAttendancePushWithRetry(username, s, subject);
 
     // Persist snapshot for consistency
     await firestore
