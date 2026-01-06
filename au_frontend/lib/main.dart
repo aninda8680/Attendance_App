@@ -10,9 +10,13 @@ import 'package:au_frontend/services/api.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:permission_handler/permission_handler.dart';
+import 'package:firebase_analytics/firebase_analytics.dart';
+import 'package:firebase_analytics/observer.dart';
+
 
 /// ✅ GLOBAL NAVIGATOR KEY (ADDED)
 final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
+final FirebaseAnalytics analytics = FirebaseAnalytics.instance;
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -32,6 +36,9 @@ class AttendanceApp extends StatelessWidget {
         colorScheme: ColorScheme.fromSeed(seedColor: Colors.indigo),
         useMaterial3: true,
       ),
+      navigatorObservers: [
+    FirebaseAnalyticsObserver(analytics: analytics),
+  ],
       home: const _Bootstrapper(),
     );
   }

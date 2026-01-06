@@ -23,6 +23,7 @@ dependencies:
   shared_preferences: ^2.2.3
   permission_handler: ^11.3.0
   vibration: ^2.0.0
+  firebase_analytics: ^12.1.0
 
 
 
