@@ -70,37 +70,24 @@ class AttendanceFAB extends StatelessWidget {
             /// NEW SCHEDULE BUTTON
             /// -------------------------------
             FloatingActionButton(
-  heroTag: "btn_routine",
-  backgroundColor: Colors.teal,
-  onPressed: () {
-    Navigator.push(
-      context,
-      PageRouteBuilder(
-        pageBuilder: (_, __, ___) => const RoutineScreen(),
-        transitionsBuilder: (_, animation, __, child) {
-          final anim = Tween(
-            begin: const Offset(1, 0),
-            end: Offset.zero,
-          ).animate(animation);
-          return SlideTransition(position: anim, child: child);
-        },
-      ),
-    );
-  },
-  child: const Icon(Icons.calendar_month, color: Colors.white),
-),
-
-
-            const SizedBox(height: 12),
-
-            /// -------------------------------
-            /// REFRESH BUTTON
-            /// -------------------------------
-            FloatingActionButton(
-              heroTag: "btn_refresh",
-              onPressed: onRefresh,
-              backgroundColor: Colors.indigo,
-              child: const Icon(Icons.refresh, color: Colors.white),
+              heroTag: "btn_routine",
+              backgroundColor: Colors.teal,
+              onPressed: () {
+                Navigator.push(
+                  context,
+                  PageRouteBuilder(
+                    pageBuilder: (_, __, ___) => const RoutineScreen(),
+                    transitionsBuilder: (_, animation, __, child) {
+                      final anim = Tween(
+                        begin: const Offset(1, 0),
+                        end: Offset.zero,
+                      ).animate(animation);
+                      return SlideTransition(position: anim, child: child);
+                    },
+                  ),
+                );
+              },
+              child: const Icon(Icons.calendar_month, color: Colors.white),
             ),
           ],
         );
